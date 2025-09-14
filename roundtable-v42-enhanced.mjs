@@ -2282,7 +2282,7 @@ async function runDiscussionRound(prompt, participants, stream, workspace, lastS
       tone: 'collaborative',
       focus: 'auto-discussion'
     };
-
+    
     const refTag = st?.moderation?.requireReference && lastSpeakers.length
       ? `Start by acknowledging ${lastSpeakers.at(-1)} in one sentence. ` : '';
 
@@ -3695,7 +3695,7 @@ function generateHTML(workspace) {
   
   // Load decisions on startup
   loadDecisions();
-  
+
   connectEventSource();
   fetchAllData();
   setInterval(fetchAllData, 5000); // Refresh data every 5 seconds
@@ -3759,22 +3759,22 @@ const HELP_TEXT = `
 // Initialization
 (async () => {
   try {
-    await initializeDirectories();
-    const workspace = getWorkspace('default');
+  await initializeDirectories();
+  const workspace = getWorkspace('default');
     await workspace.loadMemory().catch(err => {
       console.log('Memory loading skipped:', err.message);
     });
-    
-    server.listen(PORT, () => {
-      console.log(`✓ Roundtable Pro server running on http://localhost:${PORT}`);
-      if (!OPENAI_API_KEY && !ANTHROPIC_API_KEY && !GEMINI_API_KEY) {
-        console.warn('⚠️ Warning: No API keys found. AI participants will not function.');
-      } else {
-        if (!OPENAI_API_KEY) console.log('○ OpenAI provider disabled');
-        if (!ANTHROPIC_API_KEY) console.log('○ Anthropic provider disabled');
-        if (!GEMINI_API_KEY) console.log('○ Gemini provider disabled');
-      }
-    });
+  
+  server.listen(PORT, () => {
+    console.log(`✓ Roundtable Pro server running on http://localhost:${PORT}`);
+    if (!OPENAI_API_KEY && !ANTHROPIC_API_KEY && !GEMINI_API_KEY) {
+      console.warn('⚠️ Warning: No API keys found. AI participants will not function.');
+    } else {
+      if (!OPENAI_API_KEY) console.log('○ OpenAI provider disabled');
+      if (!ANTHROPIC_API_KEY) console.log('○ Anthropic provider disabled');
+      if (!GEMINI_API_KEY) console.log('○ Gemini provider disabled');
+    }
+  });
   } catch (error) {
     console.error('Server initialization error:', error);
     process.exit(1);

@@ -1,5 +1,29 @@
 {
+  "name": "decision-os-pro",
+  "version": "5.0.0",
+  "description": "Executive Strategy Platform - Enterprise-Grade Decision Operating System",
+  "main": "decision-os-pro.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node decision-os-pro.mjs",
+    "start:basic": "node roundtable-v42-enhanced.mjs",
+    "dev": "NODE_ENV=development node decision-os-pro.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "decision-making",
+    "strategic-planning",
+    "executive-tools",
+    "board-meetings",
+    "enterprise",
+    "ai-advisors"
+  ],
+  "author": "Decision OS Team",
+  "license": "MIT",
   "dependencies": {
     "pdf-parse": "^1.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
