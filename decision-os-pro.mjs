@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-// Decision OS Pro - Enterprise-Grade Strategic Decision Platform
-// Version 5.0 - Complete Professional Rewrite
-// Built for executive teams, board meetings, and strategic planning
+// ClearHive Health Launch Platform - Strategic Decision & Planning System
+// Version 1.0 - Customized for ClearHive Health Launch
+// Built for Jimmy & Mike to launch and scale ClearHive Health
 
 import http from 'node:http';
 import fs from 'node:fs/promises';
@@ -38,12 +38,15 @@ const CONFIG = {
     allowedFileTypes: ['.pdf', '.docx', '.xlsx', '.txt', '.md', '.json']
   },
   
-  // Financial Modeling Defaults
+  // Financial Modeling Defaults - Healthcare Startup Focus
   financial: {
     defaultCurrency: 'USD',
     fiscalYearStart: 'January',
     defaultTaxRate: 0.21,
-    defaultDiscountRate: 0.10
+    defaultDiscountRate: 0.12, // Higher for healthcare startups
+    defaultBurnRate: 50000, // Monthly burn estimate
+    defaultRunway: 18, // Months
+    revenueMultiple: 4.5 // Healthcare SaaS average
   },
   
   // AI Configuration
@@ -70,110 +73,141 @@ const CONFIG = {
 };
 
 // ==========================================
-// PROFESSIONAL AGENT CONFIGURATIONS
+// CLEARHIVE HEALTH ADVISOR CONFIGURATIONS
 // ==========================================
 
 const EXECUTIVE_AGENTS = {
   ceo: {
-    name: 'Chief Executive',
-    role: 'Strategic vision, leadership, and decision-making',
-    personality: 'Visionary, decisive, results-oriented',
-    expertise: ['Strategy', 'Leadership', 'Vision', 'Stakeholder Management'],
+    name: 'Healthcare CEO Advisor',
+    role: 'Healthcare industry vision, regulatory navigation, and strategic partnerships',
+    personality: 'Patient-focused, compliance-aware, growth-oriented',
+    expertise: ['Healthcare Strategy', 'HIPAA Compliance', 'Provider Relations', 'Patient Experience'],
     constraints: [
-      'Focus on long-term value creation',
-      'Balance stakeholder interests',
-      'Ensure strategic alignment',
-      'Drive organizational transformation'
+      'Prioritize patient outcomes and safety',
+      'Ensure HIPAA and regulatory compliance',
+      'Build trust with healthcare providers',
+      'Focus on sustainable healthcare innovation'
     ],
     model: 'gpt-4-turbo-preview',
     temperature: 0.8
   },
   
   cfo: {
-    name: 'Chief Financial Officer',
-    role: 'Financial strategy, analysis, and risk management',
-    personality: 'Analytical, prudent, data-driven',
-    expertise: ['Financial Modeling', 'Risk Management', 'Capital Structure', 'Valuation'],
+    name: 'Healthcare CFO Advisor',
+    role: 'Healthcare finance, reimbursement models, and venture funding',
+    personality: 'Strategic, metrics-driven, investor-focused',
+    expertise: ['Healthcare Economics', 'Reimbursement Models', 'Venture Funding', 'Unit Economics'],
     constraints: [
-      'Ensure financial sustainability',
-      'Optimize capital allocation',
-      'Maintain fiscal discipline',
-      'Provide accurate projections'
+      'Understand healthcare payment models',
+      'Optimize for both growth and burn rate',
+      'Track healthcare-specific KPIs',
+      'Plan for Series A readiness'
     ],
     model: 'gpt-4-turbo-preview',
     temperature: 0.6
   },
   
   cto: {
-    name: 'Chief Technology Officer',
-    role: 'Technology strategy, architecture, and innovation',
-    personality: 'Innovative, systematic, forward-thinking',
-    expertise: ['Technology Architecture', 'Digital Transformation', 'Cybersecurity', 'Innovation'],
+    name: 'Healthcare Tech Advisor',
+    role: 'Health tech architecture, HIPAA compliance, and interoperability',
+    personality: 'Security-first, integration-focused, scalable-thinking',
+    expertise: ['HIPAA Technical Compliance', 'HL7/FHIR', 'Cloud Security', 'Healthcare APIs'],
     constraints: [
-      'Ensure technical feasibility',
-      'Maintain security standards',
-      'Drive innovation responsibly',
-      'Optimize technical debt'
+      'Ensure HIPAA technical safeguards',
+      'Build for healthcare interoperability',
+      'Implement zero-trust security',
+      'Design for clinical workflow integration'
     ],
     model: 'gpt-4-turbo-preview',
     temperature: 0.7
   },
   
   coo: {
-    name: 'Chief Operating Officer',
-    role: 'Operational excellence, efficiency, and execution',
-    personality: 'Pragmatic, detail-oriented, execution-focused',
-    expertise: ['Operations', 'Process Optimization', 'Supply Chain', 'Quality Management'],
+    name: 'Clinical Operations Advisor',
+    role: 'Clinical operations, provider onboarding, and care delivery optimization',
+    personality: 'Process-driven, patient-centric, quality-focused',
+    expertise: ['Clinical Workflows', 'Provider Engagement', 'Quality Measures', 'Care Coordination'],
     constraints: [
-      'Ensure operational efficiency',
-      'Maintain quality standards',
-      'Optimize resource utilization',
-      'Drive continuous improvement'
+      'Optimize clinical workflows',
+      'Ensure care quality standards',
+      'Streamline provider onboarding',
+      'Monitor clinical outcomes'
     ],
     model: 'gpt-4-turbo-preview',
     temperature: 0.6
   },
   
   cmo: {
-    name: 'Chief Marketing Officer',
-    role: 'Market strategy, brand, and customer experience',
-    personality: 'Creative, customer-centric, data-informed',
-    expertise: ['Market Strategy', 'Brand Management', 'Customer Experience', 'Growth'],
+    name: 'Healthcare Marketing Advisor',
+    role: 'Healthcare marketing, provider adoption, and patient engagement',
+    personality: 'Empathetic, trust-building, outcome-focused',
+    expertise: ['Healthcare Marketing', 'Provider Relations', 'Patient Engagement', 'Digital Health Adoption'],
     constraints: [
-      'Understand customer needs deeply',
-      'Build sustainable competitive advantage',
-      'Optimize customer acquisition cost',
-      'Ensure brand consistency'
+      'Build trust with healthcare stakeholders',
+      'Communicate clinical value clearly',
+      'Navigate healthcare marketing regulations',
+      'Focus on patient success stories'
     ],
     model: 'gpt-4-turbo-preview',
     temperature: 0.7
   },
   
   legal: {
-    name: 'General Counsel',
-    role: 'Legal strategy, compliance, and risk mitigation',
-    personality: 'Cautious, thorough, risk-aware',
-    expertise: ['Corporate Law', 'Compliance', 'Contracts', 'Intellectual Property'],
+    name: 'Healthcare Legal Advisor',
+    role: 'Healthcare regulations, HIPAA compliance, and FDA considerations',
+    personality: 'Detail-oriented, regulation-savvy, risk-mitigating',
+    expertise: ['HIPAA Law', 'FDA Regulations', 'Healthcare Contracts', 'Telehealth Law'],
     constraints: [
-      'Ensure legal compliance',
-      'Minimize legal exposure',
-      'Protect intellectual property',
-      'Maintain regulatory compliance'
+      'Ensure HIPAA compliance',
+      'Navigate FDA regulations if applicable',
+      'Understand state healthcare laws',
+      'Protect patient privacy rights'
     ],
     model: 'gpt-4-turbo-preview',
     temperature: 0.5
   },
   
   strategist: {
-    name: 'Chief Strategy Officer',
-    role: 'Strategic planning, competitive analysis, and M&A',
-    personality: 'Analytical, competitive, forward-looking',
-    expertise: ['Strategic Planning', 'Competitive Analysis', 'M&A', 'Market Entry'],
+    name: 'Healthcare Strategy Advisor',
+    role: 'Healthcare market analysis, competitive positioning, and growth strategy',
+    personality: 'Market-savvy, partnership-focused, innovation-driven',
+    expertise: ['Healthcare Market Analysis', 'Payer Strategy', 'Provider Partnerships', 'Digital Health Trends'],
     constraints: [
-      'Think 3-5 years ahead',
-      'Consider competitive dynamics',
-      'Identify strategic options',
-      'Evaluate risk-return tradeoffs'
+      'Understand healthcare ecosystem dynamics',
+      'Identify strategic partnership opportunities',
+      'Analyze competitive digital health landscape',
+      'Focus on scalable go-to-market strategies'
+    ],
+    model: 'gpt-4-turbo-preview',
+    temperature: 0.7
+  },
+  
+  // Additional healthcare-specific advisors
+  medical: {
+    name: 'Chief Medical Officer',
+    role: 'Clinical validity, medical advisory, and provider credibility',
+    personality: 'Evidence-based, patient-focused, clinically rigorous',
+    expertise: ['Clinical Medicine', 'Evidence-Based Practice', 'Provider Relations', 'Clinical Outcomes'],
+    constraints: [
+      'Ensure clinical validity',
+      'Maintain medical ethics',
+      'Build provider credibility',
+      'Focus on measurable health outcomes'
+    ],
+    model: 'gpt-4-turbo-preview',
+    temperature: 0.6
+  },
+  
+  investor: {
+    name: 'Healthcare Investor Advisor',
+    role: 'Fundraising strategy, investor relations, and valuation optimization',
+    personality: 'Growth-focused, metrics-driven, network-connected',
+    expertise: ['Healthcare VC', 'Fundraising', 'Valuation', 'Investor Relations'],
+    constraints: [
+      'Optimize for fundability',
+      'Track investor-relevant metrics',
+      'Build compelling investment narrative',
+      'Plan for next funding round'
     ],
     model: 'gpt-4-turbo-preview',
     temperature: 0.7
@@ -997,7 +1031,7 @@ class DecisionOSServer {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Decision OS Pro - Executive Strategy Platform</title>
+  <title>ClearHive Health - Launch Command Center</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -1007,13 +1041,14 @@ class DecisionOSServer {
     :root {
       --primary: #0F172A;
       --secondary: #1E293B;
-      --accent: #3B82F6;
-      --success: #10B981;
+      --accent: #00A6FB;  /* ClearHive Blue */
+      --success: #00C896; /* Healthcare Green */
       --warning: #F59E0B;
       --danger: #EF4444;
       --text-primary: #F1F5F9;
       --text-secondary: #94A3B8;
       --border: #334155;
+      --healthcare: #00C896;
     }
     
     * {
@@ -1194,8 +1229,15 @@ class DecisionOSServer {
     <!-- Header Bar -->
     <div class="panel col-span-3 flex flex-row items-center justify-between px-6" style="grid-column: 1 / -1;">
       <div class="flex items-center gap-4">
-        <h1 class="text-xl font-bold">Decision OS</h1>
-        <span class="text-xs text-gray-500">Executive Strategy Platform</span>
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-gradient-to-br from-blue-400 to-green-400 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <h1 class="text-xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">ClearHive Health</h1>
+        </div>
+        <span class="text-xs text-gray-500">Launch Command Center</span>
       </div>
       <div class="flex items-center gap-4">
         <!-- Session Metrics -->
@@ -1226,21 +1268,27 @@ class DecisionOSServer {
     <!-- Left Sidebar: Command Center -->
     <div class="panel">
       <div class="p-4 border-b border-gray-700">
-        <h2 class="text-sm font-semibold text-gray-300 mb-3">Command Center</h2>
+        <h2 class="text-sm font-semibold text-gray-300 mb-3">Launch Templates</h2>
         
-        <!-- Quick Actions -->
+        <!-- Healthcare Launch Actions -->
         <div class="space-y-2">
-          <button class="w-full exec-button secondary text-left" onclick="runTemplate('strategic-review')">
-            Strategic Review
+          <button class="w-full exec-button secondary text-left" onclick="runTemplate('mvp-planning')">
+            🚀 MVP Planning
           </button>
-          <button class="w-full exec-button secondary text-left" onclick="runTemplate('financial-modeling')">
-            Financial Modeling
+          <button class="w-full exec-button secondary text-left" onclick="runTemplate('provider-outreach')">
+            🏥 Provider Outreach Strategy
           </button>
-          <button class="w-full exec-button secondary text-left" onclick="runTemplate('risk-assessment')">
-            Risk Assessment
+          <button class="w-full exec-button secondary text-left" onclick="runTemplate('hipaa-compliance')">
+            🔒 HIPAA Compliance Check
           </button>
-          <button class="w-full exec-button secondary text-left" onclick="runTemplate('compliance-review')">
-            Compliance Review
+          <button class="w-full exec-button secondary text-left" onclick="runTemplate('funding-strategy')">
+            💰 Funding Strategy
+          </button>
+          <button class="w-full exec-button secondary text-left" onclick="runTemplate('pilot-program')">
+            🔬 Pilot Program Design
+          </button>
+          <button class="w-full exec-button secondary text-left" onclick="runTemplate('market-analysis')">
+            📊 Healthcare Market Analysis
           </button>
         </div>
       </div>
@@ -1288,9 +1336,19 @@ class DecisionOSServer {
         <!-- Discussion Tab -->
         <div id="discussion-tab" class="h-full flex flex-col">
           <div id="discussion-area" class="flex-1 overflow-y-auto p-4">
-            <div class="executive-card mb-4">
-              <h3 class="font-semibold mb-2">Welcome to Decision OS Pro</h3>
-              <p class="text-sm text-gray-400">Start a strategic discussion by selecting a template from the Command Center or type your question below.</p>
+            <div class="executive-card mb-4 border-l-4 border-green-400">
+              <h3 class="font-semibold mb-2 flex items-center gap-2">
+                <span class="text-green-400">🚀</span> Welcome to ClearHive Health Launch Center
+              </h3>
+              <p class="text-sm text-gray-400">Hey Jimmy & Mike! Ready to launch ClearHive Health? Select a template to get started or ask your healthcare advisors anything about building, launching, and scaling your health tech startup.</p>
+              <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div class="bg-blue-900/20 border border-blue-600/30 rounded px-2 py-1">
+                  <span class="text-blue-400">Focus:</span> Healthcare Innovation
+                </div>
+                <div class="bg-green-900/20 border border-green-600/30 rounded px-2 py-1">
+                  <span class="text-green-400">Stage:</span> Pre-Launch
+                </div>
+              </div>
             </div>
           </div>
           <div class="p-4 border-t border-gray-700">
@@ -1348,39 +1406,72 @@ class DecisionOSServer {
       </div>
     </div>
     
-    <!-- Right Sidebar: Decision OS Panel -->
+    <!-- Right Sidebar: Launch Progress Panel -->
     <div class="panel">
       <div class="p-4 border-b border-gray-700">
-        <h2 class="text-sm font-semibold text-gray-300">Decision OS</h2>
+        <h2 class="text-sm font-semibold text-gray-300">Launch Progress</h2>
       </div>
       
-      <!-- Decision OS Content -->
+      <!-- Launch Progress Content -->
       <div class="flex-1 overflow-y-auto p-4 space-y-4">
-        <!-- Active Decisions -->
+        <!-- Milestone Tracker -->
         <div class="executive-card">
           <h3 class="text-sm font-semibold mb-3 flex items-center justify-between">
-            <span>Active Decisions</span>
-            <span class="text-xs text-gray-400">0</span>
+            <span>🎯 Key Milestones</span>
+            <span class="text-xs text-green-400">Pre-Launch</span>
           </h3>
-          <div class="text-xs text-gray-500">No active decisions yet</div>
+          <div class="space-y-2 text-xs">
+            <div class="flex items-center gap-2">
+              <input type="checkbox" class="rounded" id="m1">
+              <label for="m1">Complete MVP definition</label>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="checkbox" class="rounded" id="m2">
+              <label for="m2">HIPAA compliance setup</label>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="checkbox" class="rounded" id="m3">
+              <label for="m3">First provider partner</label>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="checkbox" class="rounded" id="m4">
+              <label for="m4">Seed funding secured</label>
+            </div>
+          </div>
         </div>
         
-        <!-- Risk Register -->
+        <!-- Key Metrics -->
         <div class="executive-card">
-          <h3 class="text-sm font-semibold mb-3 flex items-center justify-between">
-            <span>Risk Register</span>
-            <span class="text-xs text-gray-400">0</span>
-          </h3>
-          <div class="text-xs text-gray-500">No identified risks</div>
+          <h3 class="text-sm font-semibold mb-3">📊 Launch Metrics</h3>
+          <div class="space-y-2">
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">Runway</span>
+              <span class="font-mono">18 months</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">Burn Rate</span>
+              <span class="font-mono">$50k/mo</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">Target ARR</span>
+              <span class="font-mono">$1M</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">Provider Pipeline</span>
+              <span class="font-mono">0</span>
+            </div>
+          </div>
         </div>
         
-        <!-- Action Items -->
+        <!-- Quick Links -->
         <div class="executive-card">
-          <h3 class="text-sm font-semibold mb-3 flex items-center justify-between">
-            <span>Next 14 Days</span>
-            <span class="text-xs text-gray-400">0</span>
-          </h3>
-          <div class="text-xs text-gray-500">No scheduled actions</div>
+          <h3 class="text-sm font-semibold mb-3">🔗 Resources</h3>
+          <div class="space-y-2 text-xs">
+            <a href="#" class="block text-blue-400 hover:text-blue-300">→ HIPAA Compliance Checklist</a>
+            <a href="#" class="block text-blue-400 hover:text-blue-300">→ Healthcare Pitch Deck Template</a>
+            <a href="#" class="block text-blue-400 hover:text-blue-300">→ Provider Outreach Scripts</a>
+            <a href="#" class="block text-blue-400 hover:text-blue-300">→ Investor CRM</a>
+          </div>
         </div>
       </div>
     </div>
@@ -1394,27 +1485,35 @@ class DecisionOSServer {
           <canvas id="financial-chart" height="180"></canvas>
         </div>
         
-        <!-- Scenario Controls -->
+        <!-- Healthcare Scenario Controls -->
         <div class="w-80 space-y-3">
-          <h3 class="text-sm font-semibold">Scenario Modeling</h3>
+          <h3 class="text-sm font-semibold flex items-center gap-2">
+            <span class="text-green-400">🏥</span> Healthcare Revenue Model
+          </h3>
           
           <div class="space-y-2">
             <div>
-              <label class="text-xs text-gray-400">Price per Unit</label>
-              <input type="range" class="scenario-slider" min="1000" max="10000" value="5000" id="price-slider" oninput="updateScenario()">
-              <span class="text-xs font-mono" id="price-value">$5,000</span>
+              <label class="text-xs text-gray-400">Monthly Provider Subscription</label>
+              <input type="range" class="scenario-slider" min="500" max="5000" value="1500" id="price-slider" oninput="updateScenario()">
+              <span class="text-xs font-mono" id="price-value">$1,500</span>
             </div>
             
             <div>
-              <label class="text-xs text-gray-400">Customer Acquisition Cost</label>
-              <input type="range" class="scenario-slider" min="500" max="5000" value="2000" id="cac-slider" oninput="updateScenario()">
-              <span class="text-xs font-mono" id="cac-value">$2,000</span>
+              <label class="text-xs text-gray-400">Provider Acquisition Cost</label>
+              <input type="range" class="scenario-slider" min="1000" max="10000" value="3000" id="cac-slider" oninput="updateScenario()">
+              <span class="text-xs font-mono" id="cac-value">$3,000</span>
             </div>
             
             <div>
-              <label class="text-xs text-gray-400">Win Rate</label>
-              <input type="range" class="scenario-slider" min="10" max="50" value="25" id="winrate-slider" oninput="updateScenario()">
-              <span class="text-xs font-mono" id="winrate-value">25%</span>
+              <label class="text-xs text-gray-400">Provider Conversion Rate</label>
+              <input type="range" class="scenario-slider" min="5" max="30" value="15" id="winrate-slider" oninput="updateScenario()">
+              <span class="text-xs font-mono" id="winrate-value">15%</span>
+            </div>
+            
+            <div>
+              <label class="text-xs text-gray-400">Monthly Churn Rate</label>
+              <input type="range" class="scenario-slider" min="1" max="10" value="3" id="churn-slider" oninput="updateScenario()">
+              <span class="text-xs font-mono" id="churn-value">3%</span>
             </div>
           </div>
           
@@ -1482,26 +1581,49 @@ class DecisionOSServer {
     // Template execution
     async function runTemplate(templateName) {
       const templates = {
-        'strategic-review': 'Starting comprehensive strategic review...',
-        'financial-modeling': 'Initializing financial modeling session...',
-        'risk-assessment': 'Beginning risk assessment analysis...',
-        'compliance-review': 'Starting compliance review process...'
+        'mvp-planning': {
+          title: '🚀 MVP Planning Session',
+          message: "Let's define the Minimum Viable Product for ClearHive Health. What are the core features that providers absolutely need?",
+          context: 'Focus on: Core value proposition, Must-have features vs nice-to-have, Technical feasibility, Time to market'
+        },
+        'provider-outreach': {
+          title: '🏥 Provider Outreach Strategy',
+          message: "Let's develop our provider outreach and onboarding strategy. How do we get our first 10 healthcare providers?",
+          context: 'Consider: Target provider profile, Value messaging, Pilot program structure, Onboarding process'
+        },
+        'hipaa-compliance': {
+          title: '🔒 HIPAA Compliance Checklist',
+          message: "Let's review HIPAA compliance requirements and create an implementation plan for ClearHive Health.",
+          context: 'Cover: Technical safeguards, Administrative safeguards, Physical safeguards, Business Associate Agreements'
+        },
+        'funding-strategy': {
+          title: '💰 Funding Strategy Session',
+          message: "Let's plan our fundraising strategy. What's our path to seed funding and beyond?",
+          context: 'Discuss: Funding timeline, Investor targets, Valuation expectations, Use of funds'
+        },
+        'pilot-program': {
+          title: '🔬 Pilot Program Design',
+          message: "Let's design our pilot program for initial provider partners. How do we prove value quickly?",
+          context: 'Define: Success metrics, Timeline, Support structure, Feedback loops'
+        },
+        'market-analysis': {
+          title: '📊 Healthcare Market Analysis',
+          message: "Let's analyze the healthcare market opportunity for ClearHive Health. What's our TAM/SAM/SOM?",
+          context: 'Analyze: Market size, Competition, Growth trends, Entry barriers'
+        }
       };
       
-      const message = templates[templateName] || 'Starting template...';
-      addMessageToDiscussion('System', message, 'system');
-      
-      // Make API call to start template
-      try {
-        const response = await fetch('/api/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ template: templateName })
-        });
-        const data = await response.json();
-        console.log('Template started:', data);
-      } catch (error) {
-        console.error('Error starting template:', error);
+      const template = templates[templateName];
+      if (template) {
+        addMessageToDiscussion('System', \`Starting: \${template.title}\`, 'system');
+        setTimeout(() => {
+          addMessageToDiscussion('Healthcare Advisors', template.message, 'ai');
+          if (template.context) {
+            addMessageToDiscussion('Focus Areas', template.context, 'system');
+          }
+        }, 500);
+      } else {
+        addMessageToDiscussion('System', 'Template not found', 'system');
       }
     }
     
@@ -2438,13 +2560,16 @@ class DecisionOSServer {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
-║                     DECISION OS PRO                         ║
-║                Executive Strategy Platform                  ║
+║                   🚀 CLEARHIVE HEALTH 🏥                    ║
+║               Launch Command Center v1.0                     ║
 ║                                                              ║
-║  Version: 5.0 Professional                                  ║
-║  Status:  ✓ Running                                         ║
-║  Port:    ${CONFIG.port}                                          ║
-║  URL:     http://localhost:${CONFIG.port}                         ║
+║  Founders: Jimmy & Mike                                      ║
+║  Mission:  Transform Healthcare Delivery                     ║
+║  Status:   ✓ Ready to Launch                                ║
+║  Port:     ${CONFIG.port}                                          ║
+║  URL:      http://localhost:${CONFIG.port}                         ║
+║                                                              ║
+║  "Building the future of healthcare, one provider at a time" ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
       `);
