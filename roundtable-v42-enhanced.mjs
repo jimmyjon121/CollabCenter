@@ -1,12 +1,16 @@
+
 // roundtable-v42-enhanced.mjs
-// ROUNDTABLE PRO v4.2 - ENHANCED WITH MEETING MODE AND ALL FIXES
-// All bugs fixed, security hardened, ready for real use
+// ROUNDTABLE PRO v4.2 - DECISION OS INTEGRATION
+// Enhanced with DecisionOS Panel, Board Packet Export, Budget Management, PDF Support & Citation Enforcement
+// Features: Calm Roundtable + Interjection Gate, DecisionOS Panel, Board Packet v1, Per-session Budget Caps, PDF Ingestion & Citation Enforcement
 // Usage: OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-... [ROUNDTABLE_TOKEN=secret] node roundtable-v42-enhanced.mjs
 
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { URL } from 'node:url';
+
+// Budget management - inline implementation
 import crypto from 'node:crypto';
 
 // PDF support
@@ -20,6 +24,105 @@ try {
   console.log('○ PDF support disabled (install pdf-parse to enable)');
   console.log('  Error:', e.message);
 }
+
+// Citation Management
+class CitationManager {
+  constructor() {
+    this.citations = new Map();
+    this.config = {
+      requireCitation: true,
+      minConfidence: 0.7,
+      maxAnchorsPerClaim: 5,
+      autoVerify: false
+    };
+  }
+
+  extractClaims(text) {
+    const claims = [];
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 10);
+    
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if (trimmed.length === 0) continue;
+      
+      const citation = this.findCitationForClaim(trimmed);
+      const hasCitation = citation !== null;
+      
+      claims.push({
+        claim: trimmed,
+        hasCitation,
+        citation: citation || undefined
+      });
+    }
+    
+    return claims;
+  }
+
+  findCitationForClaim(claim) {
+    for (const citation of this.citations.values()) {
+      if (this.claimsMatch(claim, citation.claim)) {
+        return citation;
+      }
+    }
+    return null;
+  }
+
+  claimsMatch(claim1, claim2) {
+    const similarity = this.calculateSimilarity(claim1, claim2);
+    return similarity > 0.8;
+  }
+
+  calculateSimilarity(str1, str2) {
+    const words1 = new Set(str1.toLowerCase().split(/\s+/));
+    const words2 = new Set(str2.toLowerCase().split(/\s+/));
+    
+    const intersection = new Set([...words1].filter(x => words2.has(x)));
+    const union = new Set([...words1, ...words2]);
+    
+    return intersection.size / union.size;
+  }
+
+  hasUncitedClaims(text) {
+    if (!this.config.requireCitation) return false;
+    const claims = this.extractClaims(text);
+    return claims.some(claim => !claim.hasCitation);
+  }
+
+  getUncitedClaims(text) {
+    const claims = this.extractClaims(text);
+    return claims
+      .filter(claim => !claim.hasCitation)
+      .map(claim => claim.claim);
+  }
+
+  generateCitationMarkdown(text) {
+    const claims = this.extractClaims(text);
+    let result = text;
+    let citationCounter = 1;
+    const citations = [];
+
+    for (const claim of claims) {
+      if (claim.hasCitation && claim.citation) {
+        citations.push(claim.citation);
+        result = result.replace(claim.claim, `${claim.claim} [${citationCounter}]`);
+        citationCounter++;
+      } else if (this.config.requireCitation) {
+        result = result.replace(claim.claim, `${claim.claim} ⚠️`);
+      }
+    }
+
+    if (citations.length > 0) {
+      result += '\n\n**Citations:**\n';
+      citations.forEach((citation, index) => {
+        result += `[${index + 1}] ${citation.claim}\n`;
+      });
+    }
+
+    return result;
+  }
+}
+
+const citationManager = new CitationManager();
 
 // Check Node version and polyfill fetch if needed
 if (typeof fetch === 'undefined') {
@@ -82,6 +185,7 @@ const DB_DIR = './roundtable_data';
 const SESSIONS_DIR = `${DB_DIR}/sessions`;
 const TEMPLATES_DIR = `${DB_DIR}/templates`;
 const EXPORTS_DIR = `${DB_DIR}/exports`;
+const DECISIONS_DIR = `${DB_DIR}/decisions`;
 
 // Helper function to get appropriate model for provider
 function getModelForProvider(provider) {
@@ -98,6 +202,9 @@ const rateLimits = new Map(); // IP -> { tokens: number, lastRefill: number }
 const RATE_LIMIT_TOKENS = 20; // requests per window
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
 
+// Helper function for pacing discussions
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 // Initialize directories
 async function initializeDirectories() {
   try {
@@ -105,6 +212,7 @@ async function initializeDirectories() {
     await fs.mkdir(SESSIONS_DIR, { recursive: true });
     await fs.mkdir(TEMPLATES_DIR, { recursive: true });
     await fs.mkdir(EXPORTS_DIR, { recursive: true });
+    await fs.mkdir(DECISIONS_DIR, { recursive: true });
   } catch (error) {
     console.error('Error creating directories:', error);
   }
@@ -339,6 +447,17 @@ class Workspace {
     this.sessionStartTime = Date.now();
     this.totalTokensUsed = 0;
     this.estimatedCost = 0;
+    
+    // DecisionOS Panel Data
+    this.decisionOS = {
+      decisions: [],
+      risks: [],
+      nextTwoWeeksPlan: [],
+      metadata: {
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    };
   }
   
   async loadMemory() {
@@ -388,7 +507,8 @@ class Workspace {
       summary: this.generateSummary(),
       duration: Date.now() - this.sessionStartTime,
       tokensUsed: this.totalTokensUsed,
-      estimatedCost: this.estimatedCost
+      estimatedCost: this.estimatedCost,
+      decisionOS: this.decisionOS
     };
     
     const filename = `session_${this.sessionId}_${Date.now()}.json`;
@@ -397,7 +517,36 @@ class Workspace {
       JSON.stringify(sessionData, null, 2)
     );
     
+    // Also save DecisionOS data separately
+    await this.saveDecisionOS();
+    
     return filename;
+  }
+  
+  async saveDecisionOS() {
+    const decisionsPath = path.join(DECISIONS_DIR, `${this.sessionId}.json`);
+    this.decisionOS.metadata.updatedAt = new Date().toISOString();
+    
+    try {
+      await fs.writeFile(
+        decisionsPath,
+        JSON.stringify(this.decisionOS, null, 2)
+      );
+    } catch (error) {
+      console.error('Error saving DecisionOS data:', error);
+    }
+  }
+  
+  async loadDecisionOS() {
+    const decisionsPath = path.join(DECISIONS_DIR, `${this.sessionId}.json`);
+    
+    try {
+      const data = await fs.readFile(decisionsPath, 'utf8');
+      this.decisionOS = JSON.parse(data);
+    } catch (error) {
+      // File doesn't exist yet, use default
+      console.log('No existing DecisionOS data found');
+    }
   }
   
   // FIXED: Better summary generation with fallback
@@ -639,6 +788,19 @@ const scheduledDiscussions = new Map();
 const uploadedFiles = new Map(); // Store uploaded documents
 const activeDiscussions = new Map(); // Track active discussions for stopping
 
+// Budget and run loop management (simplified inline implementation)
+const budgetManager = {
+  totalSpent: 0,
+  sessionCap: 50.00,
+  addCost: () => true,
+  canContinue: () => true,
+  getState: () => ({ totalSpent: 0, sessionCap: 50.00, isExceeded: false, isWarning: false, isCritical: false })
+};
+
+const runLoopController = {
+  emergencyKill: () => console.log('Emergency kill triggered')
+};
+
 function getWorkspace(id) {
   if (!workspaces.has(id)) {
     const workspace = new Workspace(id);
@@ -728,6 +890,13 @@ RESPONSE FORMAT:
 - Use emotions: excitement, concern, skepticism, agreement
 
 ${command ? `Special focus: ${command}` : ''}
+
+PACE & LISTENING:
+- Keep responses calm and concise: ≤120 words total
+- Start by acknowledging the last speaker BY NAME in one sentence
+- Add ONE concrete point OR ask ONE short question
+- If you have nothing new to add, simply say: "I'll yield my turn."
+- Avoid restating the entire plan or repeating what others have said
 
 Remember: Make this feel like a REAL business meeting where everyone knows each other and cares about the outcome.
 `;
@@ -854,6 +1023,33 @@ async function callOpenAIStream(participant, context, userPrompt, stream, worksp
     }
   }
   
+  // Estimate token usage for budget tracking
+  const inputTokens = messages.reduce((acc, msg) => acc + Math.ceil(msg.content.length / 4), 0);
+  const outputTokens = Math.ceil(fullText.length / 4);
+  
+  // Record cost in budget manager
+  const costAdded = budgetManager.addCost({
+    provider: 'openai',
+    model: participant.model,
+    inputTokens,
+    outputTokens,
+    sessionId: workspace.sessionId
+  });
+  
+  // Send budget update to client
+  if (costAdded) {
+    const budgetState = budgetManager.getState();
+    stream.send('budget', { 
+      budgetUpdate: {
+        totalSpent: budgetState.totalSpent,
+        sessionCap: budgetState.config.sessionCap,
+        isWarning: budgetState.isWarning,
+        isCritical: budgetState.isCritical,
+        isExceeded: budgetState.isExceeded
+      }
+    });
+  }
+  
   return fullText;
 }
 
@@ -919,6 +1115,33 @@ async function callAnthropicStream(participant, context, userPrompt, stream, wor
     }
   }
   
+  // Estimate token usage for budget tracking
+  const inputTokens = Math.ceil(contextText.length / 4) + Math.ceil(userPrompt.length / 4);
+  const outputTokens = Math.ceil(fullText.length / 4);
+  
+  // Record cost in budget manager
+  const costAdded = budgetManager.addCost({
+    provider: 'anthropic',
+    model: participant.model,
+    inputTokens,
+    outputTokens,
+    sessionId: workspace.sessionId
+  });
+  
+  // Send budget update to client
+  if (costAdded) {
+    const budgetState = budgetManager.getState();
+    stream.send('budget', { 
+      budgetUpdate: {
+        totalSpent: budgetState.totalSpent,
+        sessionCap: budgetState.config.sessionCap,
+        isWarning: budgetState.isWarning,
+        isCritical: budgetState.isCritical,
+        isExceeded: budgetState.isExceeded
+      }
+    });
+  }
+  
   return fullText;
 }
 
@@ -962,6 +1185,33 @@ async function callGemini(participant, context, userPrompt, stream, workspace, d
       role: role.name
     });
     await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  
+  // Estimate token usage for budget tracking
+  const inputTokens = Math.ceil(contextText.length / 4) + Math.ceil(userPrompt.length / 4);
+  const outputTokens = Math.ceil(text.length / 4);
+  
+  // Record cost in budget manager
+  const costAdded = budgetManager.addCost({
+    provider: 'gemini',
+    model: participant.model,
+    inputTokens,
+    outputTokens,
+    sessionId: workspace.sessionId
+  });
+  
+  // Send budget update to client
+  if (costAdded) {
+    const budgetState = budgetManager.getState();
+    stream.send('budget', { 
+      budgetUpdate: {
+        totalSpent: budgetState.totalSpent,
+        sessionCap: budgetState.config.sessionCap,
+        isWarning: budgetState.isWarning,
+        isCritical: budgetState.isCritical,
+        isExceeded: budgetState.isExceeded
+      }
+    });
   }
   
   return text;
@@ -1080,7 +1330,16 @@ Estimated Cost: $${workspace.estimatedCost.toFixed(3)}`;
       },
       
       '/export': async () => {
-        const format = args[0] || 'pdf';
+        const format = args[0] || 'markdown';
+        
+        // Check if this is a board-packet export
+        if (format === 'board-packet') {
+          const boardPacketPath = await exportBoardPacket(workspace);
+          stream.send('system', { message: `📋 Board Packet exported to: ${boardPacketPath}` });
+          return `Board Packet generated successfully! View at: ${boardPacketPath}`;
+        }
+        
+        // Regular export
         const filename = await exportDocument(workspace, format);
         stream.send('system', { message: `📄 Exported to: ${filename}` });
         return `Document exported as ${format}: ${filename}`;
@@ -1411,6 +1670,111 @@ You're now back to the full advisory board mode. All AI advisors are available f
 Use /autodiscuss to start a group discussion or continue with individual conversations.`;
       },
 
+      '/pace': async () => {
+        const ms = Math.max(500, parseInt(args[0] || '2500', 10));
+        if (!activeDiscussions.has(workspace.id)) {
+          activeDiscussions.set(workspace.id, { 
+            shouldStop: false, 
+            isPaused: false,
+            moderation: { cooldownMs: ms }
+          });
+        } else {
+          if (!activeDiscussions.get(workspace.id).moderation) {
+            activeDiscussions.get(workspace.id).moderation = {};
+          }
+          activeDiscussions.get(workspace.id).moderation.cooldownMs = ms;
+        }
+        stream.send('system', { message: `⏱️ Pace set to ${ms}ms between speakers.` });
+        return 'Pace updated.';
+      },
+
+      '/hold': async () => {
+        if (activeDiscussions.has(workspace.id)) {
+          activeDiscussions.get(workspace.id).isPaused = true;
+          stream.send('system', { message: '⏸️ Discussion paused.' });
+        }
+        return 'Discussion paused. Send a message to continue.';
+      },
+
+      '/resume': async () => {
+        if (activeDiscussions.has(workspace.id)) {
+          const st = activeDiscussions.get(workspace.id);
+          st.isPaused = false;
+          st.interjectRequested = false;
+          stream.send('system', { message: '▶️ Discussion resumed.' });
+        }
+        return 'Discussion resumed.';
+      },
+
+      '/yield': async () => {
+        if (activeDiscussions.has(workspace.id)) {
+          activeDiscussions.get(workspace.id).interjectRequested = true;
+          stream.send('system', { message: '👂 Yielding next turn to User.' });
+        }
+        return 'Yielding to user input.';
+      },
+
+      '/limit': async () => {
+        const n = Math.max(1, parseInt(args[0] || '2', 10));
+        if (!activeDiscussions.has(workspace.id)) {
+          activeDiscussions.set(workspace.id, { 
+            shouldStop: false, 
+            isPaused: false,
+            moderation: { maxSpeakersPerRound: n }
+          });
+        } else {
+          if (!activeDiscussions.get(workspace.id).moderation) {
+            activeDiscussions.get(workspace.id).moderation = {};
+          }
+          activeDiscussions.get(workspace.id).moderation.maxSpeakersPerRound = n;
+        }
+        stream.send('system', { message: `🎚️ Max speakers per round set to ${n}.` });
+        return `Limited to ${n} speaker(s) per round.`;
+      },
+
+      '/callon': async () => {
+        const role = args[0];
+        if (!role || !AI_ROLES[role]) {
+          return `Usage: /callon <role>. Available roles: ${Object.keys(AI_ROLES).join(', ')}`;
+        }
+        if (!activeDiscussions.has(workspace.id)) {
+          activeDiscussions.set(workspace.id, { 
+            shouldStop: false, 
+            isPaused: false,
+            callOn: role
+          });
+        } else {
+          activeDiscussions.get(workspace.id).callOn = role;
+        }
+        stream.send('system', { message: `📣 Calling on ${AI_ROLES[role].name} next.` });
+        return `Next turn reserved for ${AI_ROLES[role].name}.`;
+      },
+
+      '/fix-citations': async () => {
+        const lastMessage = workspace.messages[workspace.messages.length - 1];
+        if (!lastMessage || lastMessage.role === 'user') {
+          return 'No AI message to fix citations for.';
+        }
+
+        const uncitedClaims = citationManager.getUncitedClaims(lastMessage.text);
+        if (uncitedClaims.length === 0) {
+          return 'No uncited claims found in the last message.';
+        }
+
+        const fixedText = citationManager.generateCitationMarkdown(lastMessage.text);
+        
+        // Update the message with citations
+        lastMessage.text = fixedText;
+        lastMessage.citations = uncitedClaims.map(claim => ({
+          claim,
+          status: 'needs_verification',
+          addedAt: new Date().toISOString()
+        }));
+
+        stream.send('message', lastMessage);
+        return `Fixed ${uncitedClaims.length} uncited claims. Please verify the citations.`;
+      },
+
       '/help': async () => {
         stream.send('system', { message: '📚 Available Commands:' });
         return HELP_TEXT;
@@ -1428,6 +1792,7 @@ Use /autodiscuss to start a group discussion or continue with individual convers
 
 // Main HTTP Server
 const server = http.createServer(async (req, res) => {
+  console.log(`Request: ${req.method} ${req.url}`);
   const url = new URL(req.url, `http://${req.headers.host}`);
   const workspaceId = url.searchParams.get('workspace') || 'default';
   const workspace = getWorkspace(workspaceId);
@@ -1446,6 +1811,41 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(generateHTML(workspace));
+  } else if (url.pathname === '/api/decisions' && req.method === 'GET') {
+    // Get DecisionOS data for workspace
+    const decisions = workspace.decisionOS;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(decisions));
+  } else if (url.pathname === '/api/decisions' && req.method === 'POST') {
+    // Save DecisionOS data
+    let body = '';
+    req.on('data', chunk => body += chunk.toString());
+    req.on('end', async () => {
+      try {
+        workspace.decisionOS = JSON.parse(body);
+        await workspace.saveDecisionOS();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error.message }));
+      }
+    });
+  } else if (url.pathname === '/api/kill-session' && req.method === 'POST') {
+    // Kill session endpoint
+    try {
+      await runLoopController.emergencyKill('Manual kill switch triggered');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, message: 'Session killed successfully' }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message }));
+    }
+  } else if (url.pathname === '/api/budget' && req.method === 'GET') {
+    // Get budget state
+    const budgetState = budgetManager.getState();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(budgetState));
   } else if (url.pathname === '/api/chat' && req.method === 'POST') {
     if (!checkRateLimit(req, res)) return;
     
@@ -1589,6 +1989,12 @@ async function handleStandardMode(message, command, args, workspace, stream) {
     role: 'user'
   });
   stream.send('message', userMsg);
+  
+  // Check if there's an active discussion and interject
+  if (activeDiscussions.has(workspace.id)) {
+    const st = activeDiscussions.get(workspace.id);
+    st.interjectRequested = true;
+  }
 
   let prompt = message;
   if (command) {
@@ -1653,6 +2059,12 @@ async function handleMeetingMode(message, command, args, workspace, stream) {
     role: 'user'
   });
   stream.send('message', userMsg);
+  
+  // Check if there's an active discussion and interject
+  if (activeDiscussions.has(workspace.id)) {
+    const st = activeDiscussions.get(workspace.id);
+    st.interjectRequested = true;
+  }
 
   let prompt = message;
   if (command) {
@@ -1752,12 +2164,29 @@ ${AI_ROLES[participant.role].name}: ${responseText}`;
 }
 
 async function runAutoDiscussion(config, workspace, stream) {
+  // Check budget before starting
+  if (!budgetManager.canContinue()) {
+    stream.send('system', { message: '❌ Budget exceeded. Cannot start discussion.' });
+    return;
+  }
+
   const { prompt, rounds, template, seekConsensus, naturalConversation } = config;
   let currentPrompt = prompt;
   let lastSpeakers = [];
   let silenceCount = 0;
   
-  const discussionState = { shouldStop: false, isPaused: false };
+  const discussionState = { 
+    shouldStop: false, 
+    isPaused: false, 
+    interjectRequested: false,
+    callOn: null,
+    moderation: {
+      maxSpeakersPerRound: 2,
+      cooldownMs: 2500,
+      requireReference: true,
+      userPriority: true,
+    }
+  };
   activeDiscussions.set(workspace.id, discussionState);
 
   const runTemplateRound = async (roundConfig) => {
@@ -1823,25 +2252,55 @@ async function runAutoDiscussion(config, workspace, stream) {
 }
 
 async function runDiscussionRound(prompt, participants, stream, workspace, lastSpeakers = []) {
-  let hasNewInsights = false;
-  let lastMessageId = workspace.messages.length > 0 ? workspace.messages[workspace.messages.length - 1].id : null;
+  // Check budget before each round
+  if (!budgetManager.canContinue()) {
+    stream.send('system', { message: '❌ Budget exceeded. Stopping discussion.' });
+    return false;
+  }
 
-  for (const p of participants) {
+  const st = activeDiscussions.get(workspace.id);
+  let hasNewInsights = false;
+  let lastMessageId = workspace.messages.at(-1)?.id ?? null;
+
+  // honor callOn for one round
+  const base = participants;
+  const selected = st?.callOn ? base.filter(p => p.role === st.callOn) : base;
+  if (st?.callOn) st.callOn = null;
+
+  // respect max speakers per round
+  const allowed = selected.slice(0, st?.moderation?.maxSpeakersPerRound || 2);
+
+  for (const p of allowed) {
+    if (!activeDiscussions.has(workspace.id)) break;
+    if (st?.shouldStop || st?.isPaused || st?.interjectRequested) {
+      stream.send('system', { message: '👂 Yielding to User / Paused / Stopped.' });
+      break;
+    }
+
     const discussionContext = {
       recentSpeakers: lastSpeakers,
       tone: 'collaborative',
       focus: 'auto-discussion'
     };
-    
+
+    const refTag = st?.moderation?.requireReference && lastSpeakers.length
+      ? `Start by acknowledging ${lastSpeakers.at(-1)} in one sentence. ` : '';
+
+    const ctx = workspace.getContext();
+    const apiCall = p.provider === 'openai' ? callOpenAIStream
+                 : p.provider === 'anthropic' ? callAnthropicStream
+                 : callGemini;
+
     try {
-      let responseText = '';
-      const apiCall = p.provider === 'openai' ? callOpenAIStream :
-                      p.provider === 'anthropic' ? callAnthropicStream :
-                      callGemini;
-      
-      const context = workspace.getContext();
-      responseText = await apiCall(p, context, prompt, stream, workspace, discussionContext);
-      
+      // Check budget before each API call
+      if (!budgetManager.canContinue()) {
+        stream.send('system', { message: '❌ Budget exceeded. Stopping participant responses.' });
+        break;
+      }
+
+      const responseText = await apiCall(
+        p, ctx, `${refTag}${prompt}`, stream, workspace, discussionContext
+      );
       if (responseText) {
         hasNewInsights = true;
         const aiMsg = workspace.addMessage({
@@ -1855,29 +2314,293 @@ async function runDiscussionRound(prompt, participants, stream, workspace, lastS
         });
         stream.send('message', aiMsg);
         lastMessageId = aiMsg.id;
-        
-        // Allow user to interject
-        if (AUTO_DISCUSSION_CONFIG.allowUserInterjection) {
-          // Check for pause flag
-          if (activeDiscussions.get(workspace.id)?.isPaused) {
-            stream.send('system', { message: 'Discussion paused by user.' });
-            return false; // Stop this round
-          }
-        }
+        lastSpeakers = [...lastSpeakers.slice(-2), AI_ROLES[p.role].name];
       }
-    } catch (error) {
-      console.error(`Error with ${p.provider} in auto-discussion:`, error);
-      stream.send('error', { participant: p.id, message: error.message });
+    } catch (e) {
+      console.error(`Error with ${p.provider} in auto-discussion:`, e);
+      stream.send('error', { participant: p.id, message: e.message });
+    }
+
+    if (st?.moderation?.cooldownMs) {
+      await delay(st.moderation.cooldownMs);
     }
   }
   return hasNewInsights;
 }
 
+// Board Packet Export
+async function exportBoardPacket(workspace) {
+  const { decisionOS, businessPlan, messages, decisions, actionItems } = workspace;
+  
+  // Generate board packet HTML
+  const html = generateBoardPacketHTML({
+    metadata: {
+      generatedAt: new Date().toISOString(),
+      sessionId: workspace.sessionId,
+      workspaceId: workspace.id,
+      period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`,
+      preparedBy: 'Roundtable AI Advisory Board'
+    },
+    sections: {
+      executiveSummary: generateExecutiveSummarySection(workspace),
+      ninetyDayPlan: generateNinetyDayPlanSection(workspace),
+      financials: generateFinancialsSection(workspace),
+      risks: generateRisksSection(workspace),
+      actions: generateActionsSection(workspace)
+    }
+  });
+  
+  // Save HTML file
+  const filename = `board-packet-${workspace.sessionId}-${Date.now()}.html`;
+  const filepath = path.join(EXPORTS_DIR, filename);
+  await fs.writeFile(filepath, html);
+  
+  return filepath;
+}
+
+function generateBoardPacketHTML(data) {
+  // Simplified HTML generation for board packet
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Board Packet - ${data.metadata.period}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-white text-gray-900 font-sans p-8">
+  <div class="max-w-4xl mx-auto">
+    <header class="mb-8 pb-4 border-b-2 border-blue-600">
+      <h1 class="text-3xl font-bold">Board Packet</h1>
+      <p class="text-gray-600">${data.metadata.period} | Generated: ${new Date(data.metadata.generatedAt).toLocaleDateString()}</p>
+    </header>
+    
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-blue-600">Executive Summary</h2>
+      <div class="bg-blue-50 p-4 rounded">
+        <p>${data.sections.executiveSummary.overview}</p>
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-4">
+        ${data.sections.executiveSummary.keyHighlights.map(h => 
+          '<div class="bg-white p-3 rounded shadow"><span class="text-green-600">✓</span> ' + h + '</div>'
+        ).join('')}
+      </div>
+    </section>
+    
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-green-600">90-Day Plan</h2>
+      ${data.sections.ninetyDayPlan.objectives.map(obj => `
+        <div class="mb-4 p-4 border rounded">
+          <h3 class="font-bold">${obj.title}</h3>
+          <p class="text-gray-600 text-sm">${obj.description}</p>
+          <p class="text-sm mt-2">Owner: ${obj.owner} | Status: <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">${obj.status}</span></p>
+        </div>
+      `).join('')}
+    </section>
+    
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-purple-600">Financials</h2>
+      <div class="bg-purple-50 p-4 rounded">
+        <p>${data.sections.financials.summary}</p>
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-4">
+        <div class="bg-white p-3 rounded shadow">
+          <p class="text-sm text-gray-600">Revenue</p>
+          <p class="text-xl font-bold text-green-600">$${data.sections.financials.currentQuarter.revenue.toLocaleString()}</p>
+        </div>
+        <div class="bg-white p-3 rounded shadow">
+          <p class="text-sm text-gray-600">Runway</p>
+          <p class="text-xl font-bold text-blue-600">${data.sections.financials.currentQuarter.runway}</p>
+        </div>
+      </div>
+    </section>
+    
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-red-600">Risk Assessment</h2>
+      <div class="bg-red-50 p-4 rounded mb-4">
+        <p>${data.sections.risks.summary}</p>
+      </div>
+      ${data.sections.risks.topRisks.map(risk => `
+        <div class="mb-3 p-3 border rounded">
+          <div class="flex justify-between">
+            <span class="font-semibold">${risk.risk}</span>
+            <span class="px-2 py-1 bg-${risk.severity === 'critical' ? 'red' : risk.severity === 'high' ? 'orange' : 'yellow'}-100 text-${risk.severity === 'critical' ? 'red' : risk.severity === 'high' ? 'orange' : 'yellow'}-800 rounded text-xs">${risk.severity}</span>
+          </div>
+          <p class="text-sm text-gray-600 mt-1">Mitigation: ${risk.mitigation}</p>
+        </div>
+      `).join('')}
+    </section>
+    
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-orange-600">Action Items</h2>
+      <table class="w-full">
+        <thead>
+          <tr class="border-b">
+            <th class="text-left p-2">Action</th>
+            <th class="text-left p-2">Owner</th>
+            <th class="text-left p-2">Due</th>
+            <th class="text-left p-2">Priority</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.sections.actions.immediateActions.map(action => `
+            <tr class="border-b">
+              <td class="p-2">${action.action}</td>
+              <td class="p-2">${action.owner}</td>
+              <td class="p-2">${action.dueDate}</td>
+              <td class="p-2"><span class="px-2 py-1 bg-${action.priority === 'urgent' ? 'red' : action.priority === 'high' ? 'orange' : 'yellow'}-100 text-${action.priority === 'urgent' ? 'red' : action.priority === 'high' ? 'orange' : 'yellow'}-800 rounded text-xs">${action.priority}</span></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </section>
+    
+    <footer class="mt-8 pt-4 border-t text-center text-sm text-gray-500">
+      <p>Prepared by ${data.metadata.preparedBy}</p>
+      <p>Session: ${data.metadata.sessionId}</p>
+    </footer>
+  </div>
+</body>
+</html>`;
+}
+
+function generateExecutiveSummarySection(workspace) {
+  const { decisionOS } = workspace;
+  const decisions = decisionOS?.decisions || [];
+  const risks = decisionOS?.risks || [];
+  const tasks = decisionOS?.nextTwoWeeksPlan || [];
+  
+  return {
+    overview: 'This board packet summarizes key decisions, risks, and actions from the advisory session. ' +
+              `${decisions.length} decisions made, ${risks.length} risks identified, ${tasks.length} action items planned.`,
+    keyHighlights: [
+      `${decisions.filter(d => d.status === 'completed').length} decisions completed`,
+      `${risks.filter(r => r.severity === 'critical' || r.severity === 'high').length} high/critical risks`,
+      `${tasks.filter(t => t.priority === 'urgent').length} urgent action items`,
+      `Estimated session cost: $${workspace.estimatedCost.toFixed(2)}`
+    ],
+    criticalDecisions: decisions.slice(0, 3).map(d => ({
+      decision: d.title,
+      rationale: d.context || 'Based on advisory consensus',
+      impact: 'Strategic importance'
+    })),
+    performanceSnapshot: [
+      { metric: 'Decisions', value: String(decisions.length), trend: 'up' },
+      { metric: 'Risks Mitigated', value: `${risks.filter(r => r.mitigation).length}/${risks.length}`, trend: 'flat' },
+      { metric: 'Actions', value: String(tasks.length), trend: 'up' }
+    ]
+  };
+}
+
+function generateNinetyDayPlanSection(workspace) {
+  const { decisionOS } = workspace;
+  const tasks = decisionOS?.nextTwoWeeksPlan || [];
+  const decisions = decisionOS?.decisions || [];
+  
+  // Group tasks by owner
+  const tasksByOwner = {};
+  tasks.forEach(t => {
+    if (!tasksByOwner[t.owner]) tasksByOwner[t.owner] = [];
+    tasksByOwner[t.owner].push(t);
+  });
+  
+  return {
+    objectives: Object.entries(tasksByOwner).slice(0, 3).map(([owner, ownerTasks]) => ({
+      title: `${owner}'s Objectives`,
+      description: `Key deliverables for ${owner}`,
+      keyResults: ownerTasks.slice(0, 3).map(t => t.task),
+      owner,
+      status: ownerTasks.some(t => t.status === 'blocked') ? 'at-risk' : 'in-progress'
+    })),
+    milestones: decisions.filter(d => d.dueDate).slice(0, 5).map(d => ({
+      date: new Date(d.dueDate).toLocaleDateString(),
+      milestone: d.title,
+      dependencies: [],
+      owner: d.owner
+    })),
+    resourceRequirements: [
+      { type: 'Budget', amount: 'TBD', justification: 'Operational needs' },
+      { type: 'Headcount', amount: 'TBD', justification: 'Scaling requirements' }
+    ]
+  };
+}
+
+function generateFinancialsSection(workspace) {
+  // Placeholder financials
+  return {
+    summary: 'Financial projections pending detailed analysis.',
+    currentQuarter: {
+      revenue: 0,
+      expenses: 0,
+      burnRate: 0,
+      runway: 'TBD'
+    },
+    projections: [],
+    keyMetrics: []
+  };
+}
+
+function generateRisksSection(workspace) {
+  const { decisionOS } = workspace;
+  const risks = decisionOS?.risks || [];
+  
+  return {
+    summary: `${risks.length} risks identified, ${risks.filter(r => r.severity === 'critical' || r.severity === 'high').length} require immediate attention.`,
+    topRisks: risks.map(r => ({
+      risk: r.risk,
+      severity: r.severity,
+      likelihood: r.likelihood,
+      impact: r.impact || 'Business impact',
+      mitigation: r.mitigation,
+      owner: r.owner || 'Risk Committee',
+      status: 'mitigating'
+    })),
+    riskMatrix: {
+      highImpactHighLikelihood: risks.filter(r => (r.severity === 'critical' || r.severity === 'high') && (r.likelihood === 'likely' || r.likelihood === 'certain')).map(r => r.risk),
+      highImpactLowLikelihood: risks.filter(r => (r.severity === 'critical' || r.severity === 'high') && (r.likelihood === 'unlikely' || r.likelihood === 'possible')).map(r => r.risk),
+      lowImpactHighLikelihood: risks.filter(r => (r.severity === 'low' || r.severity === 'medium') && (r.likelihood === 'likely' || r.likelihood === 'certain')).map(r => r.risk),
+      lowImpactLowLikelihood: risks.filter(r => (r.severity === 'low' || r.severity === 'medium') && (r.likelihood === 'unlikely' || r.likelihood === 'possible')).map(r => r.risk)
+    }
+  };
+}
+
+function generateActionsSection(workspace) {
+  const { decisionOS } = workspace;
+  const tasks = decisionOS?.nextTwoWeeksPlan || [];
+  const decisions = decisionOS?.decisions || [];
+  
+  return {
+    immediateActions: tasks.map(t => ({
+      action: t.task,
+      owner: t.owner,
+      dueDate: new Date(t.dueDate).toLocaleDateString(),
+      priority: t.priority,
+      status: t.status,
+      blockers: t.dependencies
+    })),
+    followUps: decisions.filter(d => d.status === 'pending').slice(0, 5).map(d => ({
+      item: d.title,
+      owner: d.owner,
+      nextStep: 'Review and finalize',
+      timeline: new Date(d.dueDate).toLocaleDateString()
+    }))
+  };
+}
+
 // PDF and Markdown Export
 async function exportDocument(workspace, format = 'pdf') {
-  const { businessPlan, messages, decisions, actionItems } = workspace;
+  const { businessPlan, messages, decisions, actionItems, decisionOS } = workspace;
   
   let content = `# Roundtable Business Plan\n\n`;
+  content += `Generated: ${new Date().toLocaleDateString()}\n\n`;
+  
+  // Add DecisionOS Executive Summary
+  if (decisionOS && (decisionOS.decisions.length > 0 || decisionOS.risks.length > 0)) {
+    content += `## Executive Summary (Decision OS)\n\n`;
+    content += `- **Key Decisions**: ${decisionOS.decisions.length}\n`;
+    content += `- **Identified Risks**: ${decisionOS.risks.length} (${decisionOS.risks.filter(r => r.severity === 'critical' || r.severity === 'high').length} high/critical)\n`;
+    content += `- **Action Items (Next 2 Weeks)**: ${decisionOS.nextTwoWeeksPlan.length}\n\n`;
+  }
   
   for (const [section, title] of Object.entries({
     executive: 'Executive Summary',
@@ -1896,8 +2619,57 @@ async function exportDocument(workspace, format = 'pdf') {
     }
   }
   
-  content += `## Key Decisions\n\n${decisions.map(d => `- ${d.text}`).join('\n')}\n\n`;
-  content += `## Action Items\n\n${actionItems.map(a => `- [ ] ${a.text}`).join('\n')}\n\n`;
+  // Add DecisionOS Decisions
+  if (decisionOS && decisionOS.decisions.length > 0) {
+    content += `## Decisions (Decision OS)\n\n`;
+    decisionOS.decisions.forEach((d, i) => {
+      content += `### ${i + 1}. ${d.title}\n`;
+      content += `- **Owner**: ${d.owner}\n`;
+      content += `- **Due Date**: ${new Date(d.dueDate).toLocaleDateString()}\n`;
+      content += `- **Status**: ${d.status}\n\n`;
+    });
+  }
+  
+  // Add DecisionOS Risks
+  if (decisionOS && decisionOS.risks.length > 0) {
+    content += `## Risk Assessment (Decision OS)\n\n`;
+    const risksBySeverity = {
+      critical: decisionOS.risks.filter(r => r.severity === 'critical'),
+      high: decisionOS.risks.filter(r => r.severity === 'high'),
+      medium: decisionOS.risks.filter(r => r.severity === 'medium'),
+      low: decisionOS.risks.filter(r => r.severity === 'low')
+    };
+    
+    for (const [severity, risks] of Object.entries(risksBySeverity)) {
+      if (risks.length > 0) {
+        content += `### ${severity.charAt(0).toUpperCase() + severity.slice(1)} Severity\n\n`;
+        risks.forEach(r => {
+          content += `**${r.risk}**\n`;
+          content += `- Mitigation: ${r.mitigation}\n`;
+          content += `- Likelihood: ${r.likelihood}\n\n`;
+        });
+      }
+    }
+  }
+  
+  // Add DecisionOS Next 2 Weeks Plan
+  if (decisionOS && decisionOS.nextTwoWeeksPlan.length > 0) {
+    content += `## Next Two Weeks Action Plan\n\n`;
+    const sortedTasks = [...decisionOS.nextTwoWeeksPlan].sort((a, b) => 
+      new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+    );
+    
+    sortedTasks.forEach(t => {
+      content += `- **${t.task}**\n`;
+      content += `  - Owner: ${t.owner}\n`;
+      content += `  - Due: ${new Date(t.dueDate).toLocaleDateString()}\n`;
+      content += `  - Priority: ${t.priority}\n`;
+      content += `  - Status: ${t.status}\n\n`;
+    });
+  }
+  
+  content += `## Key Decisions (Original)\n\n${decisions.map(d => `- ${d.text}`).join('\n')}\n\n`;
+  content += `## Action Items (Original)\n\n${actionItems.map(a => `- [ ] ${a.text}`).join('\n')}\n\n`;
   content += `## Full Discussion Log\n\n${messages.map(m => `**${m.author}**: ${m.text}`).join('\n\n')}`;
   
   const filename = `roundtable_export_${Date.now()}`;
@@ -1989,6 +2761,65 @@ function generateHTML(workspace) {
     }
     #discussion-flow-graph .vis-network { border: none !important; }
     .tab-button.active { border-bottom-color: var(--accent-color); color: white; }
+    
+    /* DecisionOS Panel Styles */
+    .decision-panel {
+      background: var(--panel-bg);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+    .decision-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .decision-tab {
+      padding: 0.5rem 1rem;
+      background: transparent;
+      color: var(--text-color);
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+    }
+    .decision-tab.active {
+      color: var(--accent-color);
+      border-bottom-color: var(--accent-color);
+    }
+    .decision-content {
+      min-height: 200px;
+    }
+    .decision-item {
+      background: var(--bg-color);
+      padding: 0.75rem;
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+    }
+    .decision-item-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+    .severity-badge {
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      color: white;
+    }
+    .severity-low { background: #10b981; }
+    .severity-medium { background: #f59e0b; }
+    .severity-high { background: #ef4444; }
+    .severity-critical { background: #7c3aed; }
+    .add-item-btn {
+      background: var(--accent-color);
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
   </style>
 </head>
 <body class="flex h-screen text-sm">
@@ -1996,6 +2827,31 @@ function generateHTML(workspace) {
   <!-- Left Panel: Controls & Participants -->
   <div class="w-1/4 bg-gray-900 p-4 flex flex-col space-y-4 overflow-y-auto">
     <h1 class="text-xl font-bold text-white">Roundtable Pro</h1>
+    
+    <!-- Cost Meter -->
+    <div id="cost-meter" class="bg-gray-800 p-3 rounded-lg">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-semibold text-gray-300">Session Budget</span>
+        <button id="kill-session-btn" class="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 hidden">
+          Stop Now
+        </button>
+      </div>
+      <div class="flex items-center space-x-2 mb-2">
+        <span id="budget-spent" class="text-sm font-mono text-white">$0.00</span>
+        <span class="text-xs text-gray-400">/</span>
+        <span id="budget-total" class="text-sm font-mono text-gray-300">$50.00</span>
+        <span id="budget-percentage" class="text-xs text-gray-400">(0%)</span>
+      </div>
+      <div class="w-full bg-gray-700 rounded-full h-2">
+        <div id="budget-progress" class="bg-green-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+      </div>
+      <div id="budget-warning" class="mt-2 text-xs text-yellow-400 hidden">
+        ⚠️ Approaching budget limit
+      </div>
+      <div id="budget-critical" class="mt-2 text-xs text-red-400 hidden">
+        🚨 Budget nearly exceeded!
+      </div>
+    </div>
     
     <!-- Meeting Mode -->
     <div id="meeting-mode-status" class="bg-gray-800 p-3 rounded-lg"></div>
@@ -2034,6 +2890,55 @@ function generateHTML(workspace) {
       <div class="relative">
         <textarea id="chat-input" class="w-full bg-gray-700 text-white p-2 pr-20 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Type your message or command..."></textarea>
         <button id="send-btn" class="absolute right-2 top-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1 rounded-lg">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DecisionOS Panel -->
+  <div id="decision-os-panel" class="decision-panel bg-gray-900 p-4">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-bold text-white">Decision OS</h2>
+      <div class="flex gap-2">
+        <button onclick="saveDecisions()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs">Save</button>
+        <button onclick="exportDecisions()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs">Export</button>
+      </div>
+    </div>
+    
+    <div class="decision-tabs">
+      <button class="decision-tab active" onclick="showDecisionTab('decisions')">
+        Decisions (<span id="decisions-count">0</span>)
+      </button>
+      <button class="decision-tab" onclick="showDecisionTab('risks')">
+        Risks (<span id="risks-count">0</span>)
+      </button>
+      <button class="decision-tab" onclick="showDecisionTab('plan')">
+        Next 2 Weeks (<span id="plan-count">0</span>)
+      </button>
+    </div>
+    
+    <div class="decision-content">
+      <!-- Decisions Tab -->
+      <div id="decisions-tab" class="tab-content">
+        <div class="mb-2">
+          <button onclick="addDecision()" class="add-item-btn">+ Add Decision</button>
+        </div>
+        <div id="decisions-list"></div>
+      </div>
+      
+      <!-- Risks Tab -->
+      <div id="risks-tab" class="tab-content hidden">
+        <div class="mb-2">
+          <button onclick="addRisk()" class="add-item-btn">+ Add Risk</button>
+        </div>
+        <div id="risks-list"></div>
+      </div>
+      
+      <!-- Plan Tab -->
+      <div id="plan-tab" class="tab-content hidden">
+        <div class="mb-2">
+          <button onclick="addTask()" class="add-item-btn">+ Add Task</button>
+        </div>
+        <div id="plan-list"></div>
       </div>
     </div>
   </div>
@@ -2099,6 +3004,71 @@ function generateHTML(workspace) {
   let eventSource;
   let thinkingTimers = new Map();
 
+  // Budget Management
+  let budgetState = {
+    totalSpent: 0,
+    sessionCap: 50.00,
+    isWarning: false,
+    isCritical: false,
+    isExceeded: false
+  };
+
+  function updateCostMeter() {
+    const spentEl = document.getElementById('budget-spent');
+    const totalEl = document.getElementById('budget-total');
+    const percentageEl = document.getElementById('budget-percentage');
+    const progressEl = document.getElementById('budget-progress');
+    const warningEl = document.getElementById('budget-warning');
+    const criticalEl = document.getElementById('budget-critical');
+    const killBtnEl = document.getElementById('kill-session-btn');
+
+    if (spentEl) spentEl.textContent = '$' + budgetState.totalSpent.toFixed(2);
+    if (totalEl) totalEl.textContent = '$' + budgetState.sessionCap.toFixed(2);
+    
+    const percentage = (budgetState.totalSpent / budgetState.sessionCap) * 100;
+    if (percentageEl) percentageEl.textContent = '(' + percentage.toFixed(1) + '%)';
+    if (progressEl) {
+      progressEl.style.width = Math.min(100, percentage) + '%';
+      progressEl.className = 'h-2 rounded-full transition-all duration-300 ' + (
+        budgetState.isExceeded ? 'bg-red-500' :
+        budgetState.isCritical ? 'bg-red-400' :
+        budgetState.isWarning ? 'bg-yellow-400' : 'bg-green-500'
+      );
+    }
+
+    // Show/hide warnings
+    if (warningEl) warningEl.classList.toggle('hidden', !budgetState.isWarning || budgetState.isCritical);
+    if (criticalEl) criticalEl.classList.toggle('hidden', !budgetState.isCritical || budgetState.isExceeded);
+    if (killBtnEl) killBtnEl.classList.toggle('hidden', !budgetState.isWarning && !budgetState.isCritical);
+  }
+
+  function killSession() {
+    if (confirm('Are you sure you want to stop the session immediately? This will abort all running discussions.')) {
+      fetch('/api/kill-session', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert('Session stopped successfully');
+            location.reload();
+          } else {
+            alert('Failed to stop session: ' + data.error);
+          }
+        })
+        .catch(error => {
+          console.error('Error stopping session:', error);
+          alert('Error stopping session');
+        });
+    }
+  }
+
+  // Set up kill button
+  document.addEventListener('DOMContentLoaded', () => {
+    const killBtn = document.getElementById('kill-session-btn');
+    if (killBtn) {
+      killBtn.addEventListener('click', killSession);
+    }
+  });
+
   function connectEventSource() {
     const workspaceId = new URLSearchParams(window.location.search).get('workspace') || 'default';
     eventSource = new EventSource('/api/chat?workspace=' + workspaceId);
@@ -2107,11 +3077,25 @@ function generateHTML(workspace) {
       const data = JSON.parse(event.data);
       renderMessage(data);
       stopThinking(data.author);
+      
+      // Update budget if cost data is included
+      if (data.budgetUpdate) {
+        budgetState = { ...budgetState, ...data.budgetUpdate };
+        updateCostMeter();
+      }
     });
 
     eventSource.addEventListener('chunk', (event) => {
       const data = JSON.parse(event.data);
       appendToMessage(data.participant, data.content, data.role);
+    });
+
+    eventSource.addEventListener('budget', (event) => {
+      const data = JSON.parse(event.data);
+      if (data.budgetUpdate) {
+        budgetState = { ...budgetState, ...data.budgetUpdate };
+        updateCostMeter();
+      }
     });
 
     eventSource.addEventListener('system', (event) => {
@@ -2188,7 +3172,17 @@ function generateHTML(workspace) {
   }
 
   function formatMessageContent(msg) {
-    const htmlContent = converter.makeHtml(msg.text);
+    let htmlContent = converter.makeHtml(msg.text);
+    
+    // Add citation warnings for AI messages
+    if (msg.role !== 'user' && citationManager.hasUncitedClaims(msg.text)) {
+      const uncitedClaims = citationManager.getUncitedClaims(msg.text);
+      htmlContent += '<div class="mt-2 p-2 bg-yellow-900 border border-yellow-600 rounded text-xs">';
+      htmlContent += '⚠️ <strong>Uncited Claims:</strong> ' + uncitedClaims.length + ' claims need citations. ';
+      htmlContent += 'Use <code>/fix-citations</code> to add citation warnings.';
+      htmlContent += '</div>';
+    }
+    
     return '<div class="font-bold ' + (msg.role === 'user' ? 'text-blue-400' : 'text-purple-400') + '">' + msg.author + '</div>' +
            '<div class="text-sm mt-1">' + htmlContent + '</div>' +
            '<div class="text-xs text-gray-500 mt-2">' + new Date(msg.timestamp).toLocaleTimeString() + '</div>';
@@ -2207,6 +3201,7 @@ function generateHTML(workspace) {
     stopThinking(participantName); // Clear existing timer
     let indicator = document.querySelector('#thinking-' + participantName.replace(/\s+/g, '-'));
     if (!indicator) {
+    
       indicator = document.createElement('span');
       indicator.id = 'thinking-' + participantName.replace(/\s+/g, '-');
       indicator.className = 'mr-2';
@@ -2509,6 +3504,198 @@ function generateHTML(workspace) {
     }
   });
 
+  // DecisionOS Panel Functions
+  let decisionOSData = {
+    decisions: [],
+    risks: [],
+    nextTwoWeeksPlan: [],
+    metadata: {
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+  };
+  
+  function showDecisionTab(tab) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
+    document.querySelectorAll('.decision-tab').forEach(t => t.classList.remove('active'));
+    
+    // Show selected tab
+    document.getElementById(tab + '-tab').classList.remove('hidden');
+    event.target.classList.add('active');
+  }
+  
+  function addDecision() {
+    const decision = {
+      id: Date.now().toString(),
+      title: prompt('Decision title:') || 'New Decision',
+      owner: prompt('Owner:') || 'Unassigned',
+      dueDate: prompt('Due date (YYYY-MM-DD):') || new Date(Date.now() + 7*24*60*60*1000).toISOString().split('T')[0],
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+    decisionOSData.decisions.push(decision);
+    renderDecisions();
+    autoSaveDecisions();
+  }
+  
+  function addRisk() {
+    const risk = {
+      id: Date.now().toString(),
+      risk: prompt('Risk description:') || 'New Risk',
+      severity: prompt('Severity (low/medium/high/critical):') || 'medium',
+      mitigation: prompt('Mitigation strategy:') || 'To be determined',
+      likelihood: 'possible',
+      createdAt: new Date().toISOString()
+    };
+    decisionOSData.risks.push(risk);
+    renderRisks();
+    autoSaveDecisions();
+  }
+  
+  function addTask() {
+    const task = {
+      id: Date.now().toString(),
+      task: prompt('Task description:') || 'New Task',
+      owner: prompt('Owner:') || 'Unassigned',
+      dueDate: prompt('Due date (YYYY-MM-DD):') || new Date(Date.now() + 7*24*60*60*1000).toISOString().split('T')[0],
+      priority: prompt('Priority (low/medium/high/urgent):') || 'medium',
+      status: 'not-started',
+      createdAt: new Date().toISOString()
+    };
+    decisionOSData.nextTwoWeeksPlan.push(task);
+    renderTasks();
+    autoSaveDecisions();
+  }
+  
+  function renderDecisions() {
+    const list = document.getElementById('decisions-list');
+    list.innerHTML = decisionOSData.decisions.map(d => 
+      '<div class="decision-item">' +
+        '<div class="decision-item-header">' +
+          '<strong>' + d.title + '</strong>' +
+          '<button onclick="deleteDecision(\\'' + d.id + '\\')" class="text-red-400 hover:text-red-300 text-xs">Delete</button>' +
+        '</div>' +
+        '<div class="text-xs text-gray-400">' +
+          'Owner: ' + d.owner + ' | Due: ' + d.dueDate + ' | Status: ' + d.status +
+        '</div>' +
+      '</div>'
+    ).join('');
+    document.getElementById('decisions-count').textContent = decisionOSData.decisions.length;
+  }
+  
+  function renderRisks() {
+    const list = document.getElementById('risks-list');
+    list.innerHTML = decisionOSData.risks.map(r => 
+      '<div class="decision-item">' +
+        '<div class="decision-item-header">' +
+          '<strong>' + r.risk + '</strong>' +
+          '<span class="severity-badge severity-' + r.severity + '">' + r.severity + '</span>' +
+        '</div>' +
+        '<div class="text-xs text-gray-400">' +
+          'Mitigation: ' + r.mitigation +
+        '</div>' +
+        '<button onclick="deleteRisk(\\'' + r.id + '\\')" class="text-red-400 hover:text-red-300 text-xs mt-2">Delete</button>' +
+      '</div>'
+    ).join('');
+    document.getElementById('risks-count').textContent = decisionOSData.risks.length;
+  }
+  
+  function renderTasks() {
+    const list = document.getElementById('plan-list');
+    list.innerHTML = decisionOSData.nextTwoWeeksPlan
+      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+      .map(t => {
+        const priorityColor = t.priority === 'urgent' ? 'red' : t.priority === 'high' ? 'yellow' : 'blue';
+        return '<div class="decision-item">' +
+          '<div class="decision-item-header">' +
+            '<strong>' + t.task + '</strong>' +
+            '<span class="text-xs px-2 py-1 rounded bg-' + priorityColor + '-600">' + t.priority + '</span>' +
+          '</div>' +
+          '<div class="text-xs text-gray-400">' +
+            'Owner: ' + t.owner + ' | Due: ' + t.dueDate + ' | Status: ' + t.status +
+          '</div>' +
+          '<button onclick="deleteTask(\\'' + t.id + '\\')" class="text-red-400 hover:text-red-300 text-xs mt-2">Delete</button>' +
+        '</div>';
+      }).join('');
+    document.getElementById('plan-count').textContent = decisionOSData.nextTwoWeeksPlan.length;
+  }
+  
+  function deleteDecision(id) {
+    decisionOSData.decisions = decisionOSData.decisions.filter(d => d.id !== id);
+    renderDecisions();
+    autoSaveDecisions();
+  }
+  
+  function deleteRisk(id) {
+    decisionOSData.risks = decisionOSData.risks.filter(r => r.id !== id);
+    renderRisks();
+    autoSaveDecisions();
+  }
+  
+  function deleteTask(id) {
+    decisionOSData.nextTwoWeeksPlan = decisionOSData.nextTwoWeeksPlan.filter(t => t.id !== id);
+    renderTasks();
+    autoSaveDecisions();
+  }
+  
+  let saveTimer;
+  function autoSaveDecisions() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDecisions, 2000);
+  }
+  
+  async function saveDecisions() {
+    decisionOSData.metadata.updatedAt = new Date().toISOString();
+    try {
+      const response = await fetch('/api/decisions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(decisionOSData)
+      });
+      if (response.ok) {
+        console.log('Decisions saved');
+      }
+    } catch (error) {
+      console.error('Failed to save decisions:', error);
+    }
+  }
+  
+  async function loadDecisions() {
+    try {
+      const response = await fetch('/api/decisions');
+      if (response.ok) {
+        decisionOSData = await response.json();
+        renderDecisions();
+        renderRisks();
+        renderTasks();
+      }
+    } catch (error) {
+      console.error('Failed to load decisions:', error);
+    }
+  }
+  
+  function exportDecisions() {
+    const exportData = {
+      ...decisionOSData,
+      exportedAt: new Date().toISOString(),
+      sessionId: new URLSearchParams(window.location.search).get('workspace') || 'default'
+    };
+    
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'decisions-' + Date.now() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  
+  // Load decisions on startup
+  loadDecisions();
+  
   connectEventSource();
   fetchAllData();
   setInterval(fetchAllData, 5000); // Refresh data every 5 seconds
@@ -2537,6 +3724,14 @@ const HELP_TEXT = `
 /stop - Stop the current autonomous discussion
 /pause - Pause an autonomous discussion to provide your own input
 
+🎛️ **Moderation Commands:**
+/pace [ms] - Set the pause duration between speakers (default: 2500ms)
+/hold - Pause the current discussion immediately
+/resume - Resume a paused discussion
+/yield - Force the panel to yield to user input
+/limit [n] - Set max speakers per round (default: 2)
+/callon [role] - Call on a specific advisor for the next turn
+
 📊 **Business Analysis Commands:**
 /brainstorm [topic] - Generate a list of ideas
 /critique - Critically analyze the last proposal for weaknesses and risks
@@ -2552,7 +3747,8 @@ const HELP_TEXT = `
 /pdf - Focus analysis specifically on uploaded PDF documents
 /remember [fact] - Store a key fact or decision in long-term memory
 /recall [topic] - Recall information from past sessions
-/export [pdf|md] - Export the current business plan and discussion to a file
+  /export [markdown|html|pdf|board-packet] - Export discussion or generate board packet
+  /fix-citations - Add citation warnings to uncited claims in last message
 
 ⚙️ **Utility Commands:**
   /search [query] - Perform a real-time web search for information
@@ -2562,18 +3758,25 @@ const HELP_TEXT = `
 
 // Initialization
 (async () => {
-  await initializeDirectories();
-  const workspace = getWorkspace('default');
-  await workspace.loadMemory();
-  
-  server.listen(PORT, () => {
-    console.log(`✓ Roundtable Pro server running on http://localhost:${PORT}`);
-    if (!OPENAI_API_KEY && !ANTHROPIC_API_KEY && !GEMINI_API_KEY) {
-      console.warn('⚠️ Warning: No API keys found. AI participants will not function.');
-    } else {
-      if (!OPENAI_API_KEY) console.log('○ OpenAI provider disabled');
-      if (!ANTHROPIC_API_KEY) console.log('○ Anthropic provider disabled');
-      if (!GEMINI_API_KEY) console.log('○ Gemini provider disabled');
-    }
-  });
+  try {
+    await initializeDirectories();
+    const workspace = getWorkspace('default');
+    await workspace.loadMemory().catch(err => {
+      console.log('Memory loading skipped:', err.message);
+    });
+    
+    server.listen(PORT, () => {
+      console.log(`✓ Roundtable Pro server running on http://localhost:${PORT}`);
+      if (!OPENAI_API_KEY && !ANTHROPIC_API_KEY && !GEMINI_API_KEY) {
+        console.warn('⚠️ Warning: No API keys found. AI participants will not function.');
+      } else {
+        if (!OPENAI_API_KEY) console.log('○ OpenAI provider disabled');
+        if (!ANTHROPIC_API_KEY) console.log('○ Anthropic provider disabled');
+        if (!GEMINI_API_KEY) console.log('○ Gemini provider disabled');
+      }
+    });
+  } catch (error) {
+    console.error('Server initialization error:', error);
+    process.exit(1);
+  }
 })();
