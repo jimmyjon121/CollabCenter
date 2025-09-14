@@ -2245,13 +2245,180 @@ class DecisionOSServer {
     }
     
     function uploadDocuments() {
-      alert('Document upload feature coming soon...');
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      modal.id = 'document-upload-modal';
+      
+      modal.innerHTML = \`
+        <div class="bg-gray-800 rounded-lg p-6 w-[600px]">
+          <h2 class="text-xl font-semibold mb-4">Document Management</h2>
+          
+          <div class="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center mb-4">
+            <input type="file" id="file-input" multiple class="hidden" 
+              accept=".pdf,.docx,.xlsx,.txt,.md,.json">
+            <svg class="w-12 h-12 mx-auto mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <p class="text-sm text-gray-400 mb-2">Drop files here or click to browse</p>
+            <button onclick="document.getElementById('file-input').click()" 
+              class="exec-button secondary">Select Files</button>
+          </div>
+          
+          <div class="flex justify-end gap-3">
+            <button onclick="document.getElementById('document-upload-modal').remove()" 
+              class="exec-button secondary">Cancel</button>
+            <button onclick="processDocumentUpload()" class="exec-button">Upload</button>
+          </div>
+        </div>
+      \`;
+      
+      document.body.appendChild(modal);
+    }
+    
+    function processDocumentUpload() {
+      // Document processing logic here
+      const files = document.getElementById('file-input').files;
+      console.log('Uploading files:', files);
+      document.getElementById('document-upload-modal').remove();
     }
     
     function addDecision() {
-      const decision = prompt('Enter decision:');
-      if (decision) {
-        alert('Decision added: ' + decision);
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      modal.id = 'decision-modal';
+      
+      modal.innerHTML = \`
+        <div class="bg-gray-800 rounded-lg p-6 w-[700px]">
+          <h2 class="text-xl font-semibold mb-4">Add Strategic Decision</h2>
+          
+          <div class="space-y-4">
+            <div>
+              <label class="text-sm text-gray-400">Decision Title</label>
+              <input type="text" id="decision-title" 
+                class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mt-1"
+                placeholder="e.g., Expand into European markets">
+            </div>
+            
+            <div>
+              <label class="text-sm text-gray-400">Category</label>
+              <select id="decision-category" 
+                class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mt-1">
+                <option value="strategic">Strategic</option>
+                <option value="financial">Financial</option>
+                <option value="operational">Operational</option>
+                <option value="personnel">Personnel</option>
+                <option value="technology">Technology</option>
+              </select>
+            </div>
+            
+            <div>
+              <label class="text-sm text-gray-400">Impact Assessment</label>
+              <textarea id="decision-impact" rows="3"
+                class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mt-1"
+                placeholder="Describe the expected impact..."></textarea>
+            </div>
+            
+            <div class="grid grid-cols-3 gap-4">
+              <div>
+                <label class="text-sm text-gray-400">Confidence Level</label>
+                <select id="decision-confidence" 
+                  class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mt-1">
+                  <option value="high">High (>80%)</option>
+                  <option value="medium">Medium (50-80%)</option>
+                  <option value="low">Low (<50%)</option>
+                </select>
+              </div>
+              
+              <div>
+                <label class="text-sm text-gray-400">Priority</label>
+                <select id="decision-priority" 
+                  class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mt-1">
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+              
+              <div>
+                <label class="text-sm text-gray-400">Timeline</label>
+                <input type="date" id="decision-timeline" 
+                  class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mt-1">
+              </div>
+            </div>
+          </div>
+          
+          <div class="flex justify-end gap-3 mt-6">
+            <button onclick="document.getElementById('decision-modal').remove()" 
+              class="exec-button secondary">Cancel</button>
+            <button onclick="saveDecision()" class="exec-button">Save Decision</button>
+          </div>
+        </div>
+      \`;
+      
+      document.body.appendChild(modal);
+    }
+    
+    function saveDecision() {
+      const decision = {
+        title: document.getElementById('decision-title').value,
+        category: document.getElementById('decision-category').value,
+        impact: document.getElementById('decision-impact').value,
+        confidence: document.getElementById('decision-confidence').value,
+        priority: document.getElementById('decision-priority').value,
+        timeline: document.getElementById('decision-timeline').value,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Save to localStorage for now
+      const decisions = JSON.parse(localStorage.getItem('decisions') || '[]');
+      decisions.push(decision);
+      localStorage.setItem('decisions', JSON.stringify(decisions));
+      
+      // Update UI
+      updateDecisionsList();
+      document.getElementById('decision-modal').remove();
+    }
+    
+    function updateDecisionsList() {
+      const decisions = JSON.parse(localStorage.getItem('decisions') || '[]');
+      const decisionOS = document.querySelector('.executive-card h3 span').parentElement.parentElement;
+      
+      if (decisions.length > 0) {
+        const listHtml = decisions.map(d => \`
+          <div class="mt-2 p-2 bg-gray-700 rounded">
+            <div class="font-semibold text-sm">\${d.title}</div>
+            <div class="text-xs text-gray-400">\${d.category} • \${d.priority} priority</div>
+          </div>
+        \`).join('');
+        
+        decisionOS.innerHTML = \`
+          <h3 class="text-sm font-semibold mb-3 flex items-center justify-between">
+            <span>Active Decisions</span>
+            <span class="text-xs text-gray-400">\${decisions.length}</span>
+          </h3>
+          \${listHtml}
+        \`;
+      }
+    }
+    
+    // Scenario presets function
+    function loadScenarioPreset(preset) {
+      const presets = {
+        conservative: { price: 3000, cac: 3000, winrate: 15, growth: 10 },
+        moderate: { price: 5000, cac: 2000, winrate: 25, growth: 20 },
+        aggressive: { price: 8000, cac: 1500, winrate: 40, growth: 35 }
+      };
+      
+      if (presets[preset]) {
+        document.getElementById('price-slider').value = presets[preset].price;
+        document.getElementById('cac-slider').value = presets[preset].cac;
+        document.getElementById('winrate-slider').value = presets[preset].winrate;
+        if (document.getElementById('growth-slider')) {
+          document.getElementById('growth-slider').value = presets[preset].growth;
+        }
+        updateScenario();
       }
     }
     
@@ -2259,6 +2426,7 @@ class DecisionOSServer {
     document.addEventListener('DOMContentLoaded', () => {
       updateChart();
       updateScenario();
+      updateDecisionsList();
     });
   </script>
 </body>
