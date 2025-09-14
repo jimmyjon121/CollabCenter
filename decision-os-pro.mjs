@@ -10,6 +10,7 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { CLEARHIVE_CONTEXT, CLEARHIVE_ADVISORS, CLEARHIVE_TEMPLATES } from './clearhive-config.mjs';
 
 // ==========================================
 // CONFIGURATION & CONSTANTS
@@ -809,6 +810,35 @@ class AuditLog {
 }
 
 // ==========================================
+// HELPER FUNCTIONS
+// ==========================================
+
+function getAvailableAgents() {
+  return {
+    ceo: { name: 'Chief Executive', role: 'Strategic vision and leadership', expertise: ['Strategy', 'Leadership', 'Vision'] },
+    cfo: { name: 'Chief Financial Officer', role: 'Financial strategy and analysis', expertise: ['Financial Modeling', 'Risk Management', 'Valuation'] },
+    cto: { name: 'Chief Technology Officer', role: 'Technology strategy and innovation', expertise: ['Architecture', 'Digital Transformation', 'Cybersecurity'] },
+    coo: { name: 'Chief Operating Officer', role: 'Operational excellence', expertise: ['Operations', 'Process Optimization', 'Quality'] },
+    cmo: { name: 'Chief Marketing Officer', role: 'Market strategy and growth', expertise: ['Market Strategy', 'Brand', 'Customer Experience'] },
+    legal: { name: 'General Counsel', role: 'Legal and compliance', expertise: ['Corporate Law', 'Compliance', 'Contracts'] },
+    strategist: { name: 'Chief Strategy Officer', role: 'Strategic planning', expertise: ['Planning', 'Competitive Analysis', 'M&A'] }
+  };
+}
+
+function getDefaultAgents() {
+  return ['ceo', 'cfo', 'strategist'];
+}
+
+function getClearHiveAdvisors() {
+  return {
+    healthcare: { name: 'Healthcare Strategy Advisor', role: 'Behavioral health industry expertise' },
+    compliance: { name: 'HIPAA Compliance Expert', role: 'Healthcare regulatory compliance' },
+    sales: { name: 'B2B Healthcare Sales', role: 'Enterprise healthcare sales strategy' },
+    clinical: { name: 'Clinical Operations', role: 'Treatment center operations expertise' }
+  };
+}
+
+// ==========================================
 // HTTP SERVER & API
 // ==========================================
 
@@ -877,9 +907,35 @@ class DecisionOSServer {
       await this.handleExport(req, res, params);
     } else if (resource === 'metrics') {
       await this.handleMetrics(req, res, params);
+    } else if (resource === 'clearhive') {
+      await this.handleClearHive(req, res, params);
     } else {
       res.writeHead(404);
       res.end(JSON.stringify({ error: 'Endpoint not found' }));
+    }
+  }
+  
+  async handleClearHive(req, res, params) {
+    const [action] = params;
+    
+    if (action === 'context') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(CLEARHIVE_CONTEXT));
+    } else if (action === 'metrics') {
+      // Calculate real-time ClearHive metrics
+      const metrics = {
+        ...CLEARHIVE_CONTEXT.metrics.current,
+        daysUntilRunway: CLEARHIVE_CONTEXT.metrics.current.runway * 30,
+        burnRate: CLEARHIVE_CONTEXT.businessModel.costs.development.monthly +
+                  CLEARHIVE_CONTEXT.businessModel.costs.sales.monthly +
+                  CLEARHIVE_CONTEXT.businessModel.costs.operations.monthly,
+        pilotsToCloseThisQuarter: CLEARHIVE_CONTEXT.metrics.targets.q1_2025.conversions
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(metrics));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: 'ClearHive data loaded' }));
     }
   }
   
@@ -1384,6 +1440,32 @@ class DecisionOSServer {
       lucide.createIcons();
     }
     
+    // Agent configuration helper functions
+    function getAvailableAgents() {
+      return {
+        ceo: { name: 'Chief Executive', role: 'Strategic vision and leadership', expertise: ['Strategy', 'Leadership', 'Vision'] },
+        cfo: { name: 'Chief Financial Officer', role: 'Financial strategy and analysis', expertise: ['Financial Modeling', 'Risk Management', 'Valuation'] },
+        cto: { name: 'Chief Technology Officer', role: 'Technology strategy and innovation', expertise: ['Architecture', 'Digital Transformation', 'Cybersecurity'] },
+        coo: { name: 'Chief Operating Officer', role: 'Operational excellence', expertise: ['Operations', 'Process Optimization', 'Quality'] },
+        cmo: { name: 'Chief Marketing Officer', role: 'Market strategy and growth', expertise: ['Market Strategy', 'Brand', 'Customer Experience'] },
+        legal: { name: 'General Counsel', role: 'Legal and compliance', expertise: ['Corporate Law', 'Compliance', 'Contracts'] },
+        strategist: { name: 'Chief Strategy Officer', role: 'Strategic planning', expertise: ['Planning', 'Competitive Analysis', 'M&A'] }
+      };
+    }
+    
+    function getDefaultAgents() {
+      return ['ceo', 'cfo', 'strategist'];
+    }
+    
+    function getClearHiveAdvisors() {
+      return {
+        healthcare: { name: 'Healthcare Strategy Advisor', role: 'Behavioral health industry expertise' },
+        compliance: { name: 'HIPAA Compliance Expert', role: 'Healthcare regulatory compliance' },
+        sales: { name: 'B2B Healthcare Sales', role: 'Enterprise healthcare sales strategy' },
+        clinical: { name: 'Clinical Operations', role: 'Treatment center operations expertise' }
+      };
+    }
+    
     // Tab switching
     function switchTab(tabName) {
       document.querySelectorAll('.tab-button').forEach(btn => {
@@ -1537,11 +1619,629 @@ class DecisionOSServer {
     }
     
     function openSettings() {
-      alert('Settings panel coming soon...');
+      // Create and show the settings modal (reuse the agent studio structure)
+      openAgentStudio();
+      
+      // Switch to the API keys tab by default when opened via Settings button
+      setTimeout(() => {
+        switchConfigTab('api-keys');
+      }, 100);
     }
     
     function openAgentStudio() {
-      alert('Agent configuration studio coming soon...');
+      // Create and show the agent configuration modal
+      const existingModal = document.getElementById('agent-config-modal');
+      if (existingModal) existingModal.remove();
+      
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      modal.id = 'agent-config-modal';
+      
+      modal.innerHTML = \`
+        <div class="bg-gray-800 rounded-lg p-6 w-[900px] max-h-[90vh] overflow-y-auto">
+          <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-semibold">Configure Advisory Board & API Settings</h2>
+            <button onclick="closeAgentConfig()" class="text-gray-400 hover:text-white">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+          
+          <!-- Tab Navigation -->
+          <div class="flex gap-4 mb-6 border-b border-gray-700">
+            <button class="pb-3 px-1 text-sm font-medium border-b-2 border-blue-500 text-blue-500" 
+              onclick="switchConfigTab('advisors')" id="advisors-tab">Advisors</button>
+            <button class="pb-3 px-1 text-sm font-medium text-gray-400 hover:text-white" 
+              onclick="switchConfigTab('api-keys')" id="api-keys-tab">API Keys</button>
+            <button class="pb-3 px-1 text-sm font-medium text-gray-400 hover:text-white" 
+              onclick="switchConfigTab('budget')" id="budget-tab">Budget & Limits</button>
+            <button class="pb-3 px-1 text-sm font-medium text-gray-400 hover:text-white" 
+              onclick="switchConfigTab('advanced')" id="advanced-tab">Advanced</button>
+          </div>
+          
+          <!-- Advisors Tab -->
+          <div id="advisors-content">
+            <div class="mb-4">
+              <p class="text-sm text-gray-400">Select AI advisors for your virtual board. Each brings specialized expertise to strategic discussions.</p>
+            </div>
+            
+            <!-- Executive Advisors -->
+            <h3 class="font-semibold text-sm mb-3">Executive Team</h3>
+            <div class="grid grid-cols-2 gap-3 mb-6">
+              ${Object.entries(getAvailableAgents()).map(([key, agent]) => `
+                <div class="executive-card p-3 hover:border-blue-500 transition-colors">
+                  <div class="flex items-start gap-3">
+                    <input type="checkbox" id="agent-${key}" value="${key}" 
+                      class="mt-1 cursor-pointer" ${getDefaultAgents().includes(key) ? 'checked' : ''}>
+                    <div class="flex-1">
+                      <label for="agent-${key}" class="font-semibold text-sm cursor-pointer flex items-center gap-2">
+                        ${agent.name}
+                        <select class="text-xs bg-gray-700 border border-gray-600 rounded px-2 py-1" 
+                          id="model-${key}" onclick="event.stopPropagation()">
+                          <option value="gpt-4-turbo-preview">GPT-4 Turbo</option>
+                          <option value="gpt-4o-mini">GPT-4 Mini</option>
+                          <option value="gpt-3.5-turbo">GPT-3.5</option>
+                          <option value="claude-3-opus">Claude 3 Opus</option>
+                          <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                          <option value="claude-3-haiku">Claude 3 Haiku</option>
+                          <option value="gemini-pro">Gemini Pro</option>
+                        </select>
+                      </label>
+                      <p class="text-xs text-gray-400 mt-1">${agent.role}</p>
+                      <div class="flex flex-wrap gap-1 mt-2">
+                        ${agent.expertise.slice(0, 3).map(skill => 
+                          `<span class="text-xs bg-gray-700 px-2 py-1 rounded">${skill}</span>`
+                        ).join('')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            
+            <!-- ClearHive Specific Advisors -->
+            <h3 class="font-semibold text-sm mb-3">ClearHive Health Specialists</h3>
+            <div class="grid grid-cols-2 gap-3 mb-6">
+              ${Object.entries(getClearHiveAdvisors()).map(([key, advisor]) => `
+                <div class="executive-card p-3 border-blue-500/30 hover:border-blue-500 transition-colors">
+                  <div class="flex items-start gap-3">
+                    <input type="checkbox" id="clearhive-${key}" value="clearhive-${key}" 
+                      class="mt-1 cursor-pointer">
+                    <div class="flex-1">
+                      <label for="clearhive-${key}" class="font-semibold text-sm cursor-pointer text-blue-400 flex items-center gap-2">
+                        ${advisor.name}
+                        <select class="text-xs bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white" 
+                          id="model-clearhive-${key}" onclick="event.stopPropagation()">
+                          <option value="gpt-4-turbo-preview">GPT-4 Turbo</option>
+                          <option value="gpt-4o-mini">GPT-4 Mini</option>
+                          <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                        </select>
+                      </label>
+                      <p class="text-xs text-gray-400 mt-1">${advisor.role}</p>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <!-- API Keys Tab -->
+          <div id="api-keys-content" class="hidden">
+            <div class="mb-4">
+              <p class="text-sm text-gray-400">Configure your API keys for different AI providers. Keys are stored securely in your browser.</p>
+            </div>
+            
+            <div class="space-y-4">
+              <div>
+                <label class="text-sm font-medium">OpenAI API Key</label>
+                <div class="flex gap-2 mt-1">
+                  <input type="password" id="openai-key" placeholder="sk-..." 
+                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                    value="">
+                  <button onclick="toggleKeyVisibility('openai-key')" class="exec-button secondary">Show</button>
+                  <button onclick="testApiKey('openai')" class="exec-button">Test</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">For GPT-4, GPT-3.5 models</p>
+              </div>
+              
+              <div>
+                <label class="text-sm font-medium">Anthropic API Key</label>
+                <div class="flex gap-2 mt-1">
+                  <input type="password" id="anthropic-key" placeholder="sk-ant-..." 
+                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                    value="">
+                  <button onclick="toggleKeyVisibility('anthropic-key')" class="exec-button secondary">Show</button>
+                  <button onclick="testApiKey('anthropic')" class="exec-button">Test</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">For Claude 3 models</p>
+              </div>
+              
+              <div>
+                <label class="text-sm font-medium">Google Gemini API Key</label>
+                <div class="flex gap-2 mt-1">
+                  <input type="password" id="gemini-key" placeholder="AI..." 
+                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                    value="">
+                  <button onclick="toggleKeyVisibility('gemini-key')" class="exec-button secondary">Show</button>
+                  <button onclick="testApiKey('gemini')" class="exec-button">Test</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">For Gemini Pro models</p>
+              </div>
+              
+              <div class="mt-6 p-4 bg-yellow-900/20 border border-yellow-600/30 rounded">
+                <p class="text-xs text-yellow-400">⚠️ API keys are stored locally in your browser and never sent to our servers.</p>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Budget Tab -->
+          <div id="budget-content" class="hidden">
+            <div class="mb-4">
+              <p class="text-sm text-gray-400">Set spending limits to control AI usage costs. Sessions will pause when limits are reached.</p>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-6">
+              <div>
+                <h4 class="text-sm font-medium mb-3">Spending Limits</h4>
+                <div class="space-y-3">
+                  <div>
+                    <label class="text-xs text-gray-400">Per Session Limit</label>
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm">$</span>
+                      <input type="number" id="session-limit" value="10.00" step="0.50" min="0.50" max="100"
+                        class="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm w-24">
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label class="text-xs text-gray-400">Daily Limit</label>
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm">$</span>
+                      <input type="number" id="daily-limit" value="50.00" step="5.00" min="5" max="500"
+                        class="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm w-24">
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label class="text-xs text-gray-400">Monthly Limit</label>
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm">$</span>
+                      <input type="number" id="monthly-limit" value="500.00" step="50.00" min="50" max="5000"
+                        class="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm w-24">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <h4 class="text-sm font-medium mb-3">Model Costs (Estimated)</h4>
+                <div class="space-y-2 text-xs">
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">GPT-4 Turbo:</span>
+                    <span class="font-mono">$0.01/1K tokens</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">GPT-3.5 Turbo:</span>
+                    <span class="font-mono">$0.001/1K tokens</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">Claude 3 Opus:</span>
+                    <span class="font-mono">$0.015/1K tokens</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">Claude 3 Sonnet:</span>
+                    <span class="font-mono">$0.003/1K tokens</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">Gemini Pro:</span>
+                    <span class="font-mono">$0.001/1K tokens</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="mt-6">
+              <h4 class="text-sm font-medium mb-3">Usage Controls</h4>
+              <div class="space-y-2">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="pause-on-limit" checked class="cursor-pointer">
+                  <span class="text-sm">Pause session when limit reached</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="warning-at-80" checked class="cursor-pointer">
+                  <span class="text-sm">Show warning at 80% of limit</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="require-confirmation" class="cursor-pointer">
+                  <span class="text-sm">Require confirmation for expensive models (>$0.01/1K)</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Advanced Tab -->
+          <div id="advanced-content" class="hidden">
+            <div class="mb-4">
+              <p class="text-sm text-gray-400">Advanced configuration options for Decision OS Pro behavior and compliance settings.</p>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-6">
+              <div>
+                <h4 class="text-sm font-medium mb-3">System Configuration</h4>
+                <div class="space-y-3">
+                  <div>
+                    <label class="text-xs text-gray-400">Session Timeout (minutes)</label>
+                    <input type="number" id="session-timeout" value="60" min="5" max="480"
+                      class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                  </div>
+                  
+                  <div>
+                    <label class="text-xs text-gray-400">Max File Size (MB)</label>
+                    <select id="max-file-size" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                      <option value="10">10 MB</option>
+                      <option value="25">25 MB</option>
+                      <option value="50" selected>50 MB</option>
+                      <option value="100">100 MB</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label class="text-xs text-gray-400">Default Currency</label>
+                    <select id="default-currency" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                      <option value="USD" selected>USD ($)</option>
+                      <option value="EUR">EUR (€)</option>
+                      <option value="GBP">GBP (£)</option>
+                      <option value="CAD">CAD (C$)</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label class="text-xs text-gray-400">Fiscal Year Start</label>
+                    <select id="fiscal-year-start" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                      <option value="January" selected>January</option>
+                      <option value="April">April</option>
+                      <option value="July">July</option>
+                      <option value="October">October</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <h4 class="text-sm font-medium mb-3">Financial Modeling</h4>
+                <div class="space-y-3">
+                  <div>
+                    <label class="text-xs text-gray-400">Default Tax Rate (%)</label>
+                    <input type="number" id="default-tax-rate" value="21" min="0" max="50" step="0.1"
+                      class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                  </div>
+                  
+                  <div>
+                    <label class="text-xs text-gray-400">Default Discount Rate (%)</label>
+                    <input type="number" id="default-discount-rate" value="10" min="0" max="30" step="0.1"
+                      class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                  </div>
+                  
+                  <div>
+                    <label class="text-xs text-gray-400">Planning Horizon (years)</label>
+                    <select id="planning-horizon" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                      <option value="3">3 years</option>
+                      <option value="5" selected>5 years</option>
+                      <option value="7">7 years</option>
+                      <option value="10">10 years</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <h4 class="text-sm font-medium mb-3 mt-6">Security & Compliance</h4>
+                <div class="space-y-2">
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="encrypt-sessions" checked class="cursor-pointer">
+                    <span class="text-sm">Encrypt session data</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="audit-logging" class="cursor-pointer">
+                    <span class="text-sm">Enable audit logging</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="data-retention" checked class="cursor-pointer">
+                    <span class="text-sm">Auto-delete sessions after 90 days</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="pii-detection" class="cursor-pointer">
+                    <span class="text-sm">Warn when PII detected</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            
+            <div class="mt-6 p-4 bg-blue-900/20 border border-blue-600/30 rounded">
+              <h5 class="text-sm font-medium text-blue-400 mb-2">🔒 Enterprise Features</h5>
+              <p class="text-xs text-gray-400">Some advanced features require an enterprise license. Contact us for SSO, custom compliance templates, and advanced security features.</p>
+            </div>
+          </div>
+          
+          <!-- Save Buttons -->
+          <div class="flex justify-between items-center mt-6 pt-6 border-t border-gray-700">
+            <div class="text-xs text-gray-500">
+              <span id="config-status"></span>
+            </div>
+            <div class="flex gap-3">
+              <button onclick="closeAgentConfig()" class="exec-button secondary">Cancel</button>
+              <button onclick="saveAgentConfig()" class="exec-button">Save Configuration</button>
+            </div>
+          </div>
+        </div>
+      \`;
+      
+      document.body.appendChild(modal);
+      
+      // Load saved configuration if exists
+      loadSavedConfiguration();
+    }
+    
+    function closeAgentConfig() {
+      const modal = document.getElementById('agent-config-modal');
+      if (modal) modal.remove();
+    }
+    
+    // Helper functions for agent configuration
+    function switchConfigTab(tabName) {
+      // Hide all content divs
+      document.getElementById('advisors-content').classList.add('hidden');
+      document.getElementById('api-keys-content').classList.add('hidden');
+      document.getElementById('budget-content').classList.add('hidden');
+      document.getElementById('advanced-content').classList.add('hidden');
+      
+      // Show selected content
+      document.getElementById(tabName + '-content').classList.remove('hidden');
+      
+      // Update tab styling
+      document.querySelectorAll('[id$="-tab"]').forEach(tab => {
+        tab.classList.remove('border-b-2', 'border-blue-500', 'text-blue-500');
+        tab.classList.add('text-gray-400');
+      });
+      
+      const activeTab = document.getElementById(tabName + '-tab');
+      activeTab.classList.remove('text-gray-400');
+      activeTab.classList.add('border-b-2', 'border-blue-500', 'text-blue-500');
+    }
+    
+    function toggleKeyVisibility(inputId) {
+      const input = document.getElementById(inputId);
+      if (input.type === 'password') {
+        input.type = 'text';
+        event.target.textContent = 'Hide';
+      } else {
+        input.type = 'password';
+        event.target.textContent = 'Show';
+      }
+    }
+    
+    async function testApiKey(provider) {
+      const keyInput = document.getElementById(provider + '-key');
+      const key = keyInput.value.trim();
+      
+      if (!key) {
+        alert('Please enter an API key first');
+        return;
+      }
+      
+      event.target.textContent = 'Testing...';
+      event.target.disabled = true;
+      
+      try {
+        // Test the API key with a simple request
+        let response;
+        if (provider === 'openai') {
+          response = await fetch('https://api.openai.com/v1/models', {
+            headers: { 'Authorization': 'Bearer ' + key }
+          });
+        } else if (provider === 'anthropic') {
+          response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': key,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: 'claude-3-haiku-20240307',
+              messages: [{ role: 'user', content: 'Hi' }],
+              max_tokens: 10
+            })
+          });
+        } else if (provider === 'gemini') {
+          response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + key);
+        }
+        
+        if (response.ok || response.status === 429) { // 429 is rate limit, but key is valid
+          alert('✓ API key is valid!');
+          document.getElementById('config-status').textContent = provider + ' key validated';
+          document.getElementById('config-status').className = 'text-xs text-green-400';
+        } else {
+          alert('✗ Invalid API key. Please check and try again.');
+          document.getElementById('config-status').textContent = provider + ' key invalid';
+          document.getElementById('config-status').className = 'text-xs text-red-400';
+        }
+      } catch (error) {
+        alert('Error testing API key: ' + error.message);
+      }
+      
+      event.target.textContent = 'Test';
+      event.target.disabled = false;
+    }
+    
+    function loadSavedConfiguration() {
+      // Load API keys from localStorage
+      const openaiKey = localStorage.getItem('openai_api_key');
+      const anthropicKey = localStorage.getItem('anthropic_api_key');
+      const geminiKey = localStorage.getItem('gemini_api_key');
+      
+      if (openaiKey) document.getElementById('openai-key').value = openaiKey;
+      if (anthropicKey) document.getElementById('anthropic-key').value = anthropicKey;
+      if (geminiKey) document.getElementById('gemini-key').value = geminiKey;
+      
+      // Load budget settings
+      const sessionLimit = localStorage.getItem('session_limit') || '10.00';
+      const dailyLimit = localStorage.getItem('daily_limit') || '50.00';
+      const monthlyLimit = localStorage.getItem('monthly_limit') || '500.00';
+      
+      document.getElementById('session-limit').value = sessionLimit;
+      document.getElementById('daily-limit').value = dailyLimit;
+      document.getElementById('monthly-limit').value = monthlyLimit;
+      
+      // Load saved agent configuration
+      const savedAgents = localStorage.getItem('selected_agents');
+      if (savedAgents) {
+        const agents = JSON.parse(savedAgents);
+        agents.forEach(agentId => {
+          const checkbox = document.getElementById('agent-' + agentId) || 
+                           document.getElementById('clearhive-' + agentId);
+          if (checkbox) checkbox.checked = true;
+        });
+      }
+      
+      // Load advanced settings
+      const advancedSettings = localStorage.getItem('advanced_settings');
+      if (advancedSettings) {
+        const settings = JSON.parse(advancedSettings);
+        
+        if (document.getElementById('session-timeout')) document.getElementById('session-timeout').value = settings.sessionTimeout || '60';
+        if (document.getElementById('max-file-size')) document.getElementById('max-file-size').value = settings.maxFileSize || '50';
+        if (document.getElementById('default-currency')) document.getElementById('default-currency').value = settings.defaultCurrency || 'USD';
+        if (document.getElementById('fiscal-year-start')) document.getElementById('fiscal-year-start').value = settings.fiscalYearStart || 'January';
+        if (document.getElementById('default-tax-rate')) document.getElementById('default-tax-rate').value = settings.defaultTaxRate || '21';
+        if (document.getElementById('default-discount-rate')) document.getElementById('default-discount-rate').value = settings.defaultDiscountRate || '10';
+        if (document.getElementById('planning-horizon')) document.getElementById('planning-horizon').value = settings.planningHorizon || '5';
+        if (document.getElementById('encrypt-sessions')) document.getElementById('encrypt-sessions').checked = settings.encryptSessions !== false;
+        if (document.getElementById('audit-logging')) document.getElementById('audit-logging').checked = settings.auditLogging || false;
+        if (document.getElementById('data-retention')) document.getElementById('data-retention').checked = settings.dataRetention !== false;
+        if (document.getElementById('pii-detection')) document.getElementById('pii-detection').checked = settings.piiDetection || false;
+      }
+    }
+    
+    function updateTempDisplay(value) {
+      document.getElementById('temp-display').textContent = (value / 10).toFixed(1);
+    }
+    
+    function getAvailableAgents() {
+      return {
+        ceo: { name: 'Chief Executive', role: 'Strategic vision and leadership', expertise: ['Strategy', 'Leadership', 'Vision'] },
+        cfo: { name: 'Chief Financial Officer', role: 'Financial strategy and analysis', expertise: ['Financial Modeling', 'Risk Management', 'Valuation'] },
+        cto: { name: 'Chief Technology Officer', role: 'Technology strategy and innovation', expertise: ['Architecture', 'Digital Transformation', 'Cybersecurity'] },
+        coo: { name: 'Chief Operating Officer', role: 'Operational excellence', expertise: ['Operations', 'Process Optimization', 'Quality'] },
+        cmo: { name: 'Chief Marketing Officer', role: 'Market strategy and growth', expertise: ['Market Strategy', 'Brand', 'Customer Experience'] },
+        legal: { name: 'General Counsel', role: 'Legal and compliance', expertise: ['Corporate Law', 'Compliance', 'Contracts'] },
+        strategist: { name: 'Chief Strategy Officer', role: 'Strategic planning', expertise: ['Planning', 'Competitive Analysis', 'M&A'] }
+      };
+    }
+    
+    function getDefaultAgents() {
+      return ['ceo', 'cfo', 'strategist'];
+    }
+    
+    function getClearHiveAdvisors() {
+      return {
+        healthcare: { name: 'Healthcare Strategy Advisor', role: 'Behavioral health industry expertise' },
+        compliance: { name: 'HIPAA Compliance Expert', role: 'Healthcare regulatory compliance' },
+        sales: { name: 'B2B Healthcare Sales', role: 'Enterprise healthcare sales strategy' },
+        clinical: { name: 'Clinical Operations', role: 'Treatment center operations expertise' }
+      };
+    }
+    
+    function saveAgentConfig() {
+      // Save API keys
+      const openaiKey = document.getElementById('openai-key')?.value.trim();
+      const anthropicKey = document.getElementById('anthropic-key')?.value.trim();
+      const geminiKey = document.getElementById('gemini-key')?.value.trim();
+      
+      if (openaiKey) localStorage.setItem('openai_api_key', openaiKey);
+      if (anthropicKey) localStorage.setItem('anthropic_api_key', anthropicKey);
+      if (geminiKey) localStorage.setItem('gemini_api_key', geminiKey);
+      
+      // Save budget settings
+      const sessionLimit = document.getElementById('session-limit')?.value || '10.00';
+      const dailyLimit = document.getElementById('daily-limit')?.value || '50.00';
+      const monthlyLimit = document.getElementById('monthly_limit')?.value || '500.00';
+      
+      localStorage.setItem('session_limit', sessionLimit);
+      localStorage.setItem('daily_limit', dailyLimit);
+      localStorage.setItem('monthly_limit', monthlyLimit);
+      
+      // Save selected agents
+      const selectedAgents = [];
+      const agentModels = {};
+      
+      document.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        const agentId = cb.value;
+        selectedAgents.push(agentId);
+        
+        // Get the selected model for this agent
+        const modelSelect = document.getElementById('model-' + agentId);
+        if (modelSelect) {
+          agentModels[agentId] = modelSelect.value;
+        }
+      });
+      
+      localStorage.setItem('selected_agents', JSON.stringify(selectedAgents));
+      localStorage.setItem('agent_models', JSON.stringify(agentModels));
+      
+      // Save advanced settings
+      const advancedSettings = {
+        sessionTimeout: document.getElementById('session-timeout')?.value || '60',
+        maxFileSize: document.getElementById('max-file-size')?.value || '50',
+        defaultCurrency: document.getElementById('default-currency')?.value || 'USD',
+        fiscalYearStart: document.getElementById('fiscal-year-start')?.value || 'January',
+        defaultTaxRate: document.getElementById('default-tax-rate')?.value || '21',
+        defaultDiscountRate: document.getElementById('default-discount-rate')?.value || '10',
+        planningHorizon: document.getElementById('planning-horizon')?.value || '5',
+        encryptSessions: document.getElementById('encrypt-sessions')?.checked || false,
+        auditLogging: document.getElementById('audit-logging')?.checked || false,
+        dataRetention: document.getElementById('data-retention')?.checked || true,
+        piiDetection: document.getElementById('pii-detection')?.checked || false
+      };
+      
+      localStorage.setItem('advanced_settings', JSON.stringify(advancedSettings));
+      
+      // Create configuration object
+      const config = {
+        agents: selectedAgents,
+        agentModels: agentModels,
+        apiKeys: {
+          openai: openaiKey,
+          anthropic: anthropicKey,
+          gemini: geminiKey
+        },
+        budget: {
+          session: parseFloat(sessionLimit),
+          daily: parseFloat(dailyLimit),
+          monthly: parseFloat(monthlyLimit)
+        },
+        advanced: advancedSettings
+      };
+      
+      // Store configuration globally
+      window.agentConfiguration = config;
+      
+      // Update UI
+      updateAgentList(selectedAgents);
+      closeAgentConfig();
+      
+      addMessageToDiscussion('System', \`Configuration saved! Selected \${selectedAgents.length} advisors with budget limits.\`, 'system');
+    }
+    
+    function updateAgentList(agents) {
+      const agentList = document.getElementById('agent-list');
+      const allAgents = {...getAvailableAgents(), ...getClearHiveAdvisors()};
+      
+      agentList.innerHTML = agents.map(agentKey => {
+        const agent = allAgents[agentKey] || allAgents[agentKey.replace('clearhive-', '')];
+        if (!agent) return '';
+        return \`<div class="text-xs text-gray-400">• \${agent.name}</div>\`;
+      }).join('');
     }
     
     function uploadDocuments() {
